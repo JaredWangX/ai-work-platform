@@ -602,11 +602,11 @@ dialog.wide { width:min(900px,calc(100% - 24px)); }
 }
 :root[data-theme=dark] { --accent:#3b82f6; }
 .shell { grid-template-columns:196px minmax(0,1fr); grid-template-rows:54px minmax(0,1fr); }
-.brand-row { position:relative; flex:none; }
-.brand { height:70px; padding:12px 20px 1px; }
-.brand img { width:154px; height:auto; }
+.brand-row { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px;flex:none;padding:0 10px 0 16px; }
+.brand { min-width:0;height:70px;padding:0; }
+.brand img { width:100%;max-width:158px;height:48px;object-fit:contain;object-position:left center; }
 .brand .brand-mark,.account-mark { display:none; }
-.brand-row>[data-action=fold-nav] { position:absolute; top:8px; right:4px; width:27px; min-height:27px; opacity:0; border-color:transparent; }
+.brand-row>[data-action=fold-nav] { width:28px;min-height:32px;padding:4px;opacity:.72;background:transparent;border-color:transparent; }
 .brand-row:hover>[data-action=fold-nav],.brand-row>[data-action=fold-nav]:focus-visible { opacity:1; }
 .navigation { padding:2px 16px 12px; }
 .nav-link { min-height:36px; gap:14px; margin-bottom:3px; padding:6px 11px; font-size:15px; }
@@ -848,9 +848,10 @@ dialog.wide { width:min(900px,calc(100% - 24px)); }
 .vault-links div>.button:hover { background:var(--soft); color:var(--link); }
 @media (min-width:721px) {
   .shell.nav-collapsed { grid-template-columns:57px minmax(0,1fr); }
-  .nav-collapsed .brand { padding:9px 0; justify-content:center; }
+  .nav-collapsed .brand-row { display:block;padding:0; }
+  .nav-collapsed .brand { padding:0;justify-content:center; }
   .nav-collapsed .brand img:first-child,.nav-collapsed .brand-row>[data-action=fold-nav],.nav-collapsed .nav-link span,.nav-collapsed .account>span:last-child { display:none; }
-  .nav-collapsed .brand-mark,.nav-collapsed .account-mark { display:block; width:29px; }
+  .nav-collapsed .brand-mark,.nav-collapsed .account-mark { display:block;width:29px;height:29px;object-fit:contain; }
   .nav-collapsed .navigation { padding-inline:8px; }
   .nav-collapsed .nav-link { justify-content:center; padding-inline:4px; }
   .nav-collapsed .account { display:flex; justify-content:center; margin-inline:8px; padding-inline:0; }
@@ -872,6 +873,7 @@ dialog.wide { width:min(900px,calc(100% - 24px)); }
 }
 @media(max-width:720px) {
   .shell { grid-template-columns:minmax(0,1fr); grid-template-rows:50px minmax(0,1fr); }
+  .brand-row { grid-template-columns:minmax(0,1fr);padding-inline:20px; }
   .brand-row>[data-action=fold-nav],.topbar-left [data-action=fold-nav] { display:none; }
   .topbar,.chat-toolbar { padding-inline:8px; }
   .topbar-right { gap:5px; }

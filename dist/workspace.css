@@ -335,25 +335,42 @@ dialog:has(.editor-fields) .dialog-header {padding:17px 21px;background:linear-g
   box-shadow: inset 0 1px var(--glass-rim), var(--glass-shadow);
 }
 .home-compose, .composer.panel {
-  background: linear-gradient(112deg,
-    var(--panel) 8%, color-mix(in srgb, var(--soft) 32%, var(--panel)) 65%,
-    color-mix(in srgb, var(--soft) 84%, var(--panel)));
+  --writing-edge:color-mix(in srgb,var(--focus) 33%,var(--line));
+  --writing-shadow:color-mix(in srgb,var(--focus) 13%,transparent);
+  background:linear-gradient(150deg,var(--panel) 12%,var(--panel) 53%,var(--soft));
+  border:1px solid var(--writing-edge);border-radius:18px;
+  box-shadow:inset 0 1px 0 var(--glass-rim),0 9px 28px -15px var(--writing-shadow);
 }
-.home-compose textarea, .composer.panel textarea { background: transparent; }
-.home-compose:focus-within, .composer.panel:focus-within {
-  border-color: var(--focus);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 16%, transparent), inset 0 1px var(--glass-rim);
+.home-compose textarea,.composer.panel textarea {
+  color:var(--ink);background:transparent;border:0;border-radius:8px;box-shadow:none;line-height:1.65;
 }
+.home-compose textarea::placeholder,.composer.panel textarea::placeholder { color:var(--dim);opacity:1; }
+.home-compose:focus-within,.composer.panel:focus-within {
+  border-color:var(--focus);box-shadow:0 0 0 2px var(--writing-shadow),inset 0 1px var(--glass-rim),var(--glass-shadow);
+}
+.home-compose .compose-footer,.composer.panel .compose-footer {
+  align-items:center;gap:8px;border-top:1px solid var(--glass-edge);padding-top:10px;
+}
+.home-compose .composer-tools .button,.composer.panel .composer-tools .button,
+.composer.panel .composer-actions :is(.icon-upload,.button:not(.primary)) {
+  background:transparent;border:1px solid transparent;color:var(--secondary);border-radius:8px;
+}
+:is(.home-compose,.composer.panel) .composer-tools .button:is(:hover,[aria-expanded=true]),
+.composer.panel .composer-actions :is(.icon-upload,.button):not(.primary):hover {
+  color:var(--link);background:var(--soft);border-color:var(--glass-edge);
+}
+.composer.panel .composer-tools .button { min-height:36px; }
+.composer.panel .composer-actions :is(.icon-button,.icon-upload) { width:36px;min-height:36px; }
+.composer.panel .send-button { box-shadow:0 2px 7px var(--writing-shadow); }
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .home-compose, .composer.panel, .resource-picker, .control-menu {
-    -webkit-backdrop-filter: blur(14px) saturate(118%);
-    backdrop-filter: blur(14px) saturate(118%);
+    -webkit-backdrop-filter:blur(20px) saturate(125%);backdrop-filter:blur(20px) saturate(125%);
   }
-  .home-compose, .composer.panel {
-    background: linear-gradient(112deg,
-      color-mix(in srgb, var(--panel) 94%, transparent) 8%,
-      color-mix(in srgb, var(--panel) 76%, var(--soft)) 65%,
-      color-mix(in srgb, var(--soft) 82%, transparent));
+  .home-compose,.composer.panel {
+    background:
+      linear-gradient(112deg,transparent 28%,color-mix(in srgb,var(--glass-rim) 60%,transparent) 45%,transparent 61%),
+      linear-gradient(148deg,color-mix(in srgb,var(--panel) 91%,transparent),
+        color-mix(in srgb,var(--panel) 77%,transparent) 46%,color-mix(in srgb,var(--soft) 85%,transparent));
   }
   .resource-picker, .control-menu {
     background: color-mix(in srgb, var(--panel) 97%, transparent);
@@ -420,7 +437,50 @@ dialog:has(.editor-fields) .dialog-header {padding:17px 21px;background:linear-g
 .team-members > button small, .team-members > button p { color: var(--secondary); }
 .team-members > button p { grid-column: 1/-1; margin-block: 6px 0; font-size: 13px; line-height: 1.6; }
 .team-members > button:is(:hover,:focus-visible), .entry-link:is(:hover,:focus-visible) { border-color: var(--focus); background: var(--soft); }
-.team-output { margin-block-start: 12px; }
+/* Keep evidence near the task or document it explains. */
+.team-output,.note-practice,.source-analysis {
+  background:linear-gradient(125deg,color-mix(in srgb,var(--soft) 60%,var(--panel)),var(--panel));
+  border:1px solid var(--line);border-radius:12px;padding:clamp(14px,1.6vw,21px);
+}
+.team-output { margin-block-start:18px; }
+.team-delivery-head,.note-practice>div { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px; }
+.team-delivery-head p { margin:5px 0 0;font-size:14px;color:var(--secondary); }
+.delivery-outline { display:grid;margin:14px 0 0; }
+.delivery-outline>div { display:grid;grid-template-columns:minmax(7em,25%) minmax(0,1fr);gap:12px;padding:10px 0;border-top:1px solid var(--line); }
+.delivery-outline>div:last-child { padding-bottom:0; }
+.delivery-outline dt,.source-analysis h3,.note-practice h3 { font-weight:650;color:var(--ink); }
+.delivery-outline dd { margin:0;color:var(--secondary);font-size:14px;line-height:1.65;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden; }
+.note-practice { margin-block:20px 0; }
+.note-practice h3 { display:flex;align-items:center;gap:8px;font-size:16px; }
+.note-practice h3 svg { width:18px;height:18px;color:var(--link); }
+.note-practice p,.source-card .source-analysis p { margin:7px 0 13px;font-size:14px;line-height:1.7;color:var(--secondary); }
+.note-practice>div { justify-content:flex-start; }
+.note-practice .file-chip,.team-delivery-head .file-chip,.file-stages .file-chip { max-width:100%;min-width:0; }
+.source-analysis { margin-top:auto;padding:14px 16px; }
+.source-analysis h3 { font-size:15px; }
+.source-card .source-analysis p { display:block;block-size:auto;overflow:visible; }
+.source-analysis .button { min-height:30px;padding:3px 0;color:var(--link);border-color:transparent;background:transparent;flex-direction:row-reverse; }
+.source-analysis .button:hover { text-decoration:underline;text-underline-offset:3px; }
+.file-stages { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,165px),1fr));gap:12px;margin:0 0 15px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--ground); }
+.file-stages div { min-width:0; }
+.file-stages dt { font-size:13px;font-weight:650;color:var(--secondary);margin-bottom:6px; }
+.file-stages dd { display:grid;gap:5px;margin:0; }
+.file-stages .file-chip { width:fit-content;background:var(--panel); }
+@media(max-width:720px) {
+  .delivery-outline>div { grid-template-columns:1fr;gap:3px; }
+  .source-analysis .button { min-height:40px; }
+  .case-heading { flex-wrap:wrap;gap:6px 10px; }
+  .chat-examples { min-width:0;max-width:100%; }
+  .prompt-suggestions .button { max-width:100%;white-space:normal;text-align:start;line-height:1.5; }
+  .prompt-suggestions svg { flex:none; }
+  .models-page .connection-list .view-heading { flex-wrap:wrap;gap:8px; }
+}
+@media(max-width:370px) {
+  .chat-toolbar>div:last-child { justify-content:flex-end; }
+  .prompt-suggestions { display:grid;grid-template-columns:minmax(0,1fr);padding-inline:10px; }
+  .prompt-suggestions .button { justify-content:space-between;border-radius:10px;padding-inline:11px; }
+  .prompt-suggestions [data-action=more-prompts] { justify-content:center; }
+}
 .note-index > summary { display: flex; align-items: center; gap: 7px; cursor: pointer; list-style: none; color: var(--ink); font-weight: 650; padding: 5px 3px 9px; }
 .note-index > summary::-webkit-details-marker { display: none; }
 .note-index > summary small { margin-inline-start: auto; font-weight: 500; color: var(--dim); }
@@ -608,8 +668,7 @@ dialog:has(.editor-fields) .dialog-header {padding:17px 21px;background:linear-g
   .business-story { margin-top:0; }
 }
 .home-compose,.composer.panel { position:relative;isolation:isolate; }
-.glass-reflection { position:absolute;inset:0;width:100%;height:100%;z-index:-1;border-radius:inherit;pointer-events:none;opacity:.87; }
-@media(prefers-reduced-motion:reduce),(prefers-reduced-transparency:reduce),(forced-colors:active){ .glass-reflection { display:none; } }
+@media(min-width:721px) { .composer.panel { padding:14px 16px 12px; } }
 .home-suggestion { appearance:none;border:0;background:transparent; }
 .story-nav { gap:5px; }
 .story-nav button { appearance:none;border:1px solid transparent;background:transparent; }

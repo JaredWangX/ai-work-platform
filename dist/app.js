@@ -1,5 +1,4 @@
 import './auth-story.mjs';
-import './composer-glass.mjs';
 import {teamSync} from './team-sync.mjs';
 import {apiUrl} from './api.mjs';
 import {databases,workspaceAPI,workspaceToken} from './workspace-client.mjs';
@@ -34,7 +33,8 @@ const uid = () => crypto.randomUUID();
 const byId = (key,id) => state[key].find(item => item.id === id);
 const selected = (a,b) => a === b ? ' selected' : '';
 const avatar = name => escape(name.trim().slice(0,1) || 'O');
-const compactChat = () => innerWidth <= 899;
+const compactChatWidth=matchMedia('(max-width:899px)');
+const compactChat=()=>compactChatWidth.matches;
 
 function load(reset = false) {
   let existing;
@@ -113,6 +113,7 @@ let activeNote = state.knowledge[0]?.id;
 let noteView = 'read';
 let graphNeighborhood = false;
 let historyOpen = !compactChat();
+let historyRequested = false;
 let spaceOpen = false;
 let mobileMenu = false;
 let navCollapsed = localStorage.getItem('workspace-nav-collapsed')==='true';
@@ -557,7 +558,7 @@ function projects() {
   if (projectTab==='overview') content=projectOverview(files);
   if (projectTab==='files') content=`<section class="project-subview" data-display="project-files"><div class="view-heading"><h2>关联文件</h2><span>${files.length} 份文件</span></div><div class="file-gallery">${files.map(file=>fileTile(file)).join('')||empty('任务关联的文件会显示在这里。')}</div></section>`;
   if (projectTab==='activity') content=`<section class="project-subview" data-display="project-activity"><div class="view-heading"><h2>任务讨论</h2><span>${comments.length} 条记录</span></div><div class="panel activity-feed">${comments.map(({item,author,text})=>`<article><span class="person-stamp">${avatar(author)}</span><div><header><strong>${escape(author)}</strong><button type="button" data-action="project-detail" data-id="${escape(item.id)}">${escape(item.name)} ${icon('chevron-right')}</button></header><p>${escape(text)}</p></div></article>`).join('')||empty('打开任务添加讨论后，可在这里查看。')}</div></section>`;
-  return `<div class="page projects-page">${heading('新品发布协作','产品团队 · 发布方案、渠道素材与客户反馈',button('新建任务','edit',{primary:true,glyph:'plus',extra:'data-collection="projects"'}))}
+  return `<div class="page projects-page">${heading('新品发布协作','从素材核对到渠道验收，按负责人跟进每项任务；在任务详情中查看关联文件和讨论记录。',button('新建任务','edit',{primary:true,glyph:'plus',extra:'data-collection="projects"'}))}
     <div class="page-tabs" role="group" aria-label="项目视图">${tabs.map(([id,label])=>button(label,'project-tab',{id,extra:`aria-pressed="${projectTab===id}"`})).join('')}</div>${content}</div>`;
 }
 function projectOverview(files) {
@@ -602,8 +603,8 @@ function tasks() {
     ${button('新建任务','edit',{primary:true,glyph:'plus',extra:'data-collection="tasks"'})}</div>`;
   const taskView=routeDetail==='types'?'types':'list';
   const tabs=`<div class="page-tabs" role="group" aria-label="任务视图">${[['list','任务列表 '+state.tasks.length],['types','任务类型 '+tags.length]].map(([id,label])=>button(label,'task-view',{id,extra:`aria-pressed="${taskView===id}"`})).join('')}</div>`;
-  if(taskView==='types') return `<div class="page tasks-page">${heading('自动化任务','让重复工作，按计划完成。')}${tabs}${taskSchedule(tags)}</div>`;
-  return `<div class="page tasks-page">${heading('自动化任务','让重复工作，按计划完成。')}${tabs}
+  if(taskView==='types') return `<div class="page tasks-page">${heading('自动化任务','按北京时间安排经营简报、内容整理与数据核对，打开执行记录可查看结果和失败原因。')}${tabs}${taskSchedule(tags)}</div>`;
+  return `<div class="page tasks-page">${heading('自动化任务','按北京时间安排经营简报、内容整理与数据核对，打开执行记录可查看结果和失败原因。')}${tabs}
     <div class="metrics panel task-metrics">${[['全部任务',state.tasks.length],['执行中',state.tasks.filter(item=>loading.has(item.id)).length],['已下线',state.tasks.filter(item=>!item.enabled).length],['最近成功',state.tasks.filter(item=>item.runs[0]?.status==='success').length],['最近失败',state.tasks.filter(item=>item.runs[0]?.status==='failed').length]].map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join('')}</div>
     ${filters}<div class="panel table"><table class="responsive-table"><thead><tr><th scope="col">任务 / 类型</th><th scope="col">触发规则</th><th scope="col">调度</th><th scope="col">最近执行</th><th scope="col">操作</th></tr></thead><tbody id="task-rows">${taskRows()}</tbody></table></div>
     <p class="footnote">共 ${state.tasks.length} 项任务 · 北京时间（UTC+8） · 保存并启用任务后，服务器会按计划执行</p></div>`;
@@ -624,7 +625,7 @@ function taskRows() {
   const visible=state.tasks.filter(item=>item.name.toLowerCase().includes(taskSearch.trim().toLowerCase()) &&
     (taskTag==='all'||item.tag===taskTag) &&
     (taskStatus==='all'||(taskStatus==='enabled'&&item.enabled)||(taskStatus==='disabled'&&!item.enabled)||(taskStatus==='failed'&&item.runs[0]?.status==='failed')));
-  return visible.map(item=>`<tr><td data-label="任务"><div class="task-identity"><span class="tile-icon">${icon('bot')}</span><div><strong>${escape(item.name)}</strong><small>AI 自动化 ${item.tag?badge(item.tag):''}</small></div></div></td>
+  return visible.map(item=>`<tr><td data-label="任务"><div class="task-identity"><span class="tile-icon">${icon('bot')}</span><div><strong>${escape(item.name)}</strong><small title="${escape(byId('staff',item.assignee)?.name||'未指定执行助手')}">${escape(byId('staff',item.assignee)?.name||'未指定执行助手')} ${item.tag?badge(item.tag):''}</small></div></div></td>
     <td data-label="触发规则">${escape(item.frequency)} ${escape(item.time)}<small>北京时间 · UTC+8</small></td>
     <td data-label="调度"><span class="task-schedule${item.enabled?' is-enabled':''}">${item.scheduled?(item.enabled?'后台已启用':'后台已暂停'):'本地示例'}</span></td>
     <td data-label="最近执行">${taskRunBadge(item.runs[0])}<small>${escape(item.runs[0]?.at || '—')}</small></td>
@@ -637,7 +638,7 @@ function taskHistory(task) {
   const visible=executions.map((run,index)=>({run,index})).filter(({run})=>runFilter==='all' || run.status===runFilter);
   const current=visible.find(item=>item.index===runIndex)||visible[0];
   return `<div class="page task-history-page"><a href="#tasks" class="back-link">返回任务列表</a>
-    ${heading(task.name,'AI 自动化 · '+task.frequency+' '+task.time+' · 北京时间',button(loading.has(task.id)?'执行中':'执行任务','run',{id:task.id,glyph:'play',primary:true,disabled:loading.has(task.id)}))}
+    ${heading(task.name,(byId('staff',task.assignee)?.name||'定时任务')+' · '+task.frequency+' '+task.time+' · 北京时间',button(loading.has(task.id)?'执行中':'执行任务','run',{id:task.id,glyph:'play',primary:true,disabled:loading.has(task.id)}))}
     <div class="metrics panel history-metrics">${[['执行次数',executions.length],['成功率',executions.length?Math.round(successes/executions.length*100)+'%':'—'],['平均耗时',average ? average+' 秒':'—'],['最近执行',executions[0]?.at || '—']].map(([label,value])=>`<div><span>${label}</span><strong>${escape(value)}</strong></div>`).join('')}</div>
     <div class="panel task-history"><aside>
       <div class="segments" role="group" aria-label="按结果筛选">${[['all','全部'],['success','成功'],['failed','失败']].map(([id,label])=>button(label,'run-filter',{id,extra:`aria-pressed="${runFilter===id}"`})).join('')}</div>
@@ -677,6 +678,10 @@ function knowledgeGraph(note) {
 }
 function knowledge() {
   const note=byId('knowledge',activeNote)||state.knowledge[0];
+  const original=note && seed.knowledge.find(item=>item.id===note.id);
+  const practice=original && note.name===original.name && note.body===original.body && noteCases[note.id];
+  const example=practice && featuredCases.find(item=>item.id===practice.caseId);
+  const exampleInput=practice && byId('files',practice.file);
   const paragraphs=note?.body.split(/\n\n+/)||[];
   const outline=paragraphs.flatMap((part,index)=>part.includes('\n')?[button(part.split('\n')[0],'note-section',{id:String(index)})]:[]);
   const outgoing=note ? state.knowledge.filter(item=>item.id===note.related) : [];
@@ -692,17 +697,25 @@ function knowledge() {
       <div id="notes">${Object.entries(groups).map(([label,items],index)=>`<details class="note-folder ${graphTones[index%graphTones.length]}" open><summary>${icon('chevron-down')}<i></i>${escape(label)}<small>${items.length}</small></summary>${items.map(item=>`<div data-search="${escape(item.name+' '+item.description+' '+item.body)}"><button class="note-link${item.id===note?.id?' active':''}" data-action="note" data-id="${item.id}" aria-pressed="${item.id===note?.id}">${icon('file-text')}${escape(item.name)}</button></div>`).join('')}</details>`).join('')||empty('暂无笔记')}</div></details></aside>
     <article class="vault-reader">${!note ? empty('选择一篇笔记查看内容。') : noteView==='graph' ? knowledgeGraph(note):
       `<header class="note-heading"><div><p>${escape(note.description || '笔记')}</p><h2>${escape(note.name)}</h2></div><div class="row-actions">${button('编辑','edit',{id:note.id,extra:'data-collection="knowledge"'})}${button('删除','delete',{id:note.id,extra:'data-collection="knowledge"'})}</div></header>
-        <div class="note-body">${paragraphs.map((paragraph,index)=>{const [title,...lines]=paragraph.split('\n');return lines.length?`<section><h3 id="note-section-${index}" tabindex="-1">${escape(title)}</h3><p class="preserve-lines">${escape(lines.join('\n'))}</p></section>`:`<p>${escape(title)}</p>`;}).join('')}</div>`}</article>
+        <div class="note-body">${paragraphs.map((paragraph,index)=>{const [title,...lines]=paragraph.split('\n');return lines.length?`<section><h3 id="note-section-${index}" tabindex="-1">${escape(title)}</h3><p class="preserve-lines">${escape(lines.join('\n'))}</p></section>`:`<p>${escape(title)}</p>`;}).join('')}</div>
+        ${example?`<section class="note-practice"><h3>${icon('book-open')}案例核对 · ${escape(example.label)}</h3><p>${escape(practice.text)}</p>
+        <div>${exampleInput?fileButton(exampleInput):''}${button('查看案例对话','open-example',{id:example.id,glyph:'arrow-right'})}</div></section>`:''}`}</article>
     <aside class="vault-links">${noteView==='read'&&outline.length?`<div class="article-outline"><h3>本文目录</h3>${outline.join('')}</div>`:''}<div><h3>引用的笔记 <small>${outgoing.length}</small></h3>${outgoing.map(noteButton).join('') || '<p>暂无引用</p>'}</div><div><h3>引用本文的笔记 <small>${incoming.length}</small></h3>${incoming.map(noteButton).join('') || '<p>暂无反向引用</p>'}</div>
       ${note&&noteView==='graph'?button('阅读当前笔记','note-view',{id:'read',glyph:'book-open'}):''}</aside>
     </div></div></div>`;
 }
 function files() {
   const chosen=featuredCases.find(example=>example.id===caseFilter);
-  return `<div class="page files-page" data-display="library">${heading('文件管理','按案例查找资料，打开文件后可以直接引用到对话。',`<div class="library-actions">${button('案例演示','start-replay',{glyph:'play',primary:true})}${uploadControl('上传文件','files')}</div>`)}
+  const stages=chosen?[
+    ['原始资料',[chosen.input]],
+    ['首次交付',chosen.reply.files],
+    ['后续核查',chosen.follow?.reply.files||[]],
+  ].map(([label,ids])=>[label,ids.map(id=>byId('files',id)).filter(Boolean)]).filter(([,items])=>items.length):[];
+  return `<div class="page files-page" data-display="library">${heading('文件管理','按业务案例查找原始资料、分析表和交付稿。打开文件可核对内容，也可带入对话继续处理。',`<div class="library-actions">${button('案例演示','start-replay',{glyph:'play',primary:true})}${uploadControl('上传文件','files')}</div>`)}
     <nav class="dossier-shelf" aria-label="按案例查看文件">${featuredCases.map(example=>dossierCard(example,true)).join('')}</nav>
     <section class="library-panel panel"><div class="view-heading library-heading"><div><h2>${escape(chosen?.label||'全部文件')}</h2><span id="file-count">${visibleFiles().length} 份文件</span></div>
     <div class="library-links">${chosen?button('全部文件','file-case',{id:'all'})+button('查看案例对话','open-example',{id:chosen.id,glyph:'messages-square'}):''}</div></div>
+    ${stages.length?`<dl class="file-stages">${stages.map(([label,items])=>`<div><dt>${label}</dt><dd>${items.map(f=>fileButton(f)).join('')}</dd></div>`).join('')}</dl>`:''}
     <div class="library-controls"><label class="search-field">${icon('search')}<input id="file-search" type="search" aria-label="搜索文件" placeholder="搜索文件名称…" value="${escape(fileQuery)}"></label>
       <select id="file-type" aria-label="文件类型"><option value="all">全部类型</option>${fileTypes.map(type=>`<option${selected(type,fileType)}>${type}</option>`).join('')}</select>
       <div class="view-switch" role="group" aria-label="文件显示方式">${[['list','列表','list'],['grid','预览','grid']].map(([id,name,glyph])=>button(name,'library-layout',{id,glyph,extra:`aria-pressed="${libraryLayout===id}"`})).join('')}</div></div>
@@ -745,20 +758,29 @@ function fileResults() {
     <span class="library-size">${escape(fileSize(file))}</span><div class="row-actions">${libraryFileActions(file)}</div></div>`).join('')}</div>`;
 }
 const collections = {
-  staff:['AI 员工','配置团队的 AI 助手，按任务分配工作。','创建员工'],
+  staff:['AI 员工','按业务职责选择助手，核对它已绑定的技能与资料，再把具体任务交给它。','创建员工'],
   teams:['专家团队','编辑团队的职责与协作分工。','添加团队'],
-  users:['用户管理','查看和调整演示工作空间的成员记录。','添加成员'],
-  skills:['我的技能','整理和复用团队常用的工作方法。','添加技能'],
-  market:['技能市场','将常用工具添加到我的技能。',''],
+  users:['用户管理','核对成员角色、邀请状态和工作空间归属。','添加成员'],
+  skills:['我的技能','将周报口径、资料核对规则和交付格式存成技能，在对话或定时任务中重复使用。','添加技能'],
+  market:['技能市场','按手头的材料选择技能。预览时可核对输入、交付内容和验收要求，再添加到团队的技能库。',''],
+};
+const noteCases={
+  k1:{caseId:'research',file:'case-research-input',text:'R02 的 6 名受访者中有 4 人提到下班后排队。他们来自同一客户群。要判断这个问题是否普遍，下一轮访谈需要覆盖不同站点和时段。'},
+  k2:{caseId:'research',file:'case-evidence',text:'R01 列有 12 个站点，只有 5 个附晚间巡检时间。另 7 个仍需补采，同时可用的设备数也待记录。评审时可以沿证据编号查到原文。'},
+  k3:{caseId:'research',file:'case-research-input',text:'R03 中甲方案包含上门安装，乙方案将安装费单列。先向两家服务商索取同一地址、同一配置的含安装报价，再比较总价。'},
+  k4:{caseId:'operations',file:'case-weekly-sheet',text:'渠道明细记录了 5,800 笔支付订单和 177 笔退款订单。整体退款率为 177 ÷ 5,800，约 3.05%。各渠道订单量不同，直接平均三项退款率会产生偏差。'},
+  k5:{caseId:'operations',file:'case-weekly-doc',text:'周报先交代销售额从 39.4 万元增至 42.6 万元，再单列平台旗舰店 4.58% 的退款率。涉及 A104 和 B207 的原因仍待核查，因此写在行动清单中。'},
+  k6:{caseId:'launch',file:'case-launch-checks',text:'案例中的桌面端、移动端和渠道落地页已有核对记录。交接给客服时，请对方搜索“下载失败”，确认替代入口可用，并在验收表中补上核对时间。'},
+  k7:{caseId:'launch',file:'case-launch-checks',text:'以“下载失败”为例，回访时记录设备、访问入口、发生时间和用户原话。随后复现下载流程，把临时解决方式和待跟进人一并交给客服。'},
 };
 const marketStaff=[
-  {id:'market-feedback',name:'客户反馈助手',specialty:'客服运营',description:'按产品问题、使用建议与售后咨询归类反馈，保留原话并整理回访记录。'},
-  {id:'market-meeting',name:'会议纪要助手',specialty:'会议纪要',description:'提取会议决定、负责人和截止日期，单列尚未决定的事项。'},
+  {id:'market-feedback',name:'客户反馈助手',specialty:'客服运营',description:'按产品问题、使用建议与售后咨询归类反馈，保留原话并整理回访记录。',example:'整理一周售后记录，按问题归类并列出尚待回访的客户问题。'},
+  {id:'market-meeting',name:'会议纪要助手',specialty:'会议纪要',description:'提取会议决定、负责人和截止日期，单列尚未决定的事项。',example:'整理交接会议原文，列清已经达成的决定和下次会议前的待办。'},
 ];
 const marketRecipes={
-  meeting:{output:'会议决定与行动清单',example:'把这份会议记录整理为已决定事项、负责人、截止日期和待确认问题。'},
-  sheet:{output:'问题行与复核清单',example:'检查这份表格，逐行标出缺失字段、重复记录和格式不一致的值。'},
-  format:{output:'分级标题与交付清单',example:'整理这份报告的标题层级，把需要跟进的事项汇总为清单。'},
+  meeting:{icon:'clipboard-list',input:'会议原文、参会人及议题',output:'决议摘要、责任人和到期日',check:'逐条区分已决定和待讨论的事项。承诺与截止日期要能回到原话；未指定负责人时标为待认领。',example:'把这份会议记录整理为已决定事项、负责人、截止日期和待确认问题。'},
+  sheet:{icon:'grid',input:'含表头的明细、唯一编号及必填字段',output:'异常行号、原值与复核建议',check:'按唯一编号识别重复行，单独列出空字段和单位不一致的记录。保留原值，交由业务负责人确认后再修正。',example:'检查这份表格，逐行标出缺失字段、重复记录和格式不一致的值。'},
+  format:{icon:'file-text',input:'报告原稿、目标读者与交付格式',output:'分级标题、证据表与行动清单',check:'检查小标题能否回答读者的问题。对照原稿核对金额、日期和单位，文末逐项标明待办及负责人。',example:'整理这份报告的标题层级，把需要跟进的事项汇总为清单。'},
 };
 const staffGlyph=id=>({s1:'📊',s2:'🔎',s3:'📝'})[id]||icon('bot');
 function cardExcerpt(label,text) {
@@ -779,7 +801,9 @@ function collection(key) {
     const installed = state.skills.some(skill=>skill.marketId === item.id);
     const hired=marketList&&!!byId('staff',item.id);
     let binding='',context='';
-    if(key==='staff'&&!marketList){
+    if(marketList){
+      context=cardExcerpt('适用场景',item.example);
+    }else if(key==='staff'){
       const names=(item.skills||[]).map(id=>byId('skills',id)?.name).filter(Boolean);
       binding=bindingLine('已绑技能',names.join('、')||'尚未配置');
       const sources=[item.vault?'团队业务资料':'',byId('database',item.database)?.name].filter(Boolean);
@@ -789,10 +813,10 @@ function collection(key) {
       binding=bindingLine('使用员工',people.map(person=>person.name).join('、')||'可在对话中单独使用');
       if(item.instructions)context=cardExcerpt('执行要求',item.instructions);
     }else if(key==='market'&&marketRecipes[item.id]){
-      binding=bindingLine('交付内容',marketRecipes[item.id].output);
+      binding=bindingLine('准备材料',marketRecipes[item.id].input)+bindingLine('交付内容',marketRecipes[item.id].output);
       context=cardExcerpt('示例指令',marketRecipes[item.id].example);
     }
-    const glyph=key==='staff'?staffGlyph(item.id):icon(groups.flatMap(([,links])=>links).find(([name])=>name===key)[2]);
+    const glyph=key==='staff'?staffGlyph(item.id):icon((key==='market' && marketRecipes[item.id]?.icon) || groups.flatMap(([,links])=>links).find(([name])=>name===key)[2]);
     return `<article class="panel collection-card${key==='staff'?' employee-card':''}" data-search="${escape(item.name+' '+item.description)}"><header><span class="tile-icon" aria-hidden="true">${glyph}</span><h2 title="${escape(item.name)}">${escape(item.name)}</h2></header><p>${escape(item.description)}</p>
     ${context}${binding}<div class="collection-footer"><div class="card-meta">${item.specialty ? badge(item.specialty) : ''}</div>
     <div class="row-actions">${marketList ? button(hired?'已加入':'聘用','hire-staff',{id:item.id,disabled:hired,primary:!hired}) : key==='market' ? button('预览','market-preview',{id:item.id})+button(installed?'已添加':'安装','install',{id:item.id,disabled:installed,primary:!installed})
@@ -817,12 +841,14 @@ function teams() {
   const team=byId('teams',activeTeam)||state.teams[0];
   const members=(team?.members||[]).map(id=>byId('staff',id)).filter(Boolean);
   const file=byId('files',team?.file);
-  return `<div class="page">${heading('专家团队','查看不同专长的助手怎样分工，并继续处理产物。',button('创建团队','edit',{primary:true,glyph:'plus',extra:'data-collection="teams"'}))}
+  const sections=(file?.sections||[]).filter(section=>section.title && section.text).slice(0,3);
+  return `<div class="page">${heading('专家团队','查看每位成员负责的工作，沿着交付文件核对分析依据、业务结论和后续分工。',button('创建团队','edit',{primary:true,glyph:'plus',extra:'data-collection="teams"'}))}
     <div class="team-layout"><aside>${state.teams.map(item=>`<button class="team-select panel" type="button" data-action="select-team" data-id="${item.id}" aria-pressed="${item.id===team?.id}"><strong>${escape(item.name)}</strong><small>${(item.members||[]).filter(id=>byId('staff',id)).length} 位成员 · ${escape(item.specialty)}</small></button>`).join('')||empty('暂无团队')}</aside>
     <section class="panel team-detail">${team?`<div class="side-title"><h2>${escape(team.name)}</h2>${button('管理成员','edit',{id:team.id,extra:'data-collection="teams"'})}</div><p>${escape(team.description)}</p>
-      <div class="subhead team-subhead"><h3>团队分工</h3><small>${members.length} 位成员</small></div>
-      <div class="team-members">${members.map(person=>`<button type="button" data-action="staff-detail" data-id="${escape(person.id)}"><span class="tile-icon" aria-hidden="true">${staffGlyph(person.id)}</span><strong>${escape(person.name)}</strong><small>${escape(person.specialty||'通用')}</small><p>${escape(person.description)}</p></button>`).join('')||empty('请选择团队成员')}</div>
-      ${file?`<div class="team-output"><h3>协作产物</h3><p>${escape(file.hint||'可打开并继续补充。')}</p>${fileButton(file)}</div>`:''}`:empty('创建团队后配置成员。')}</section></div></div>`;
+      <div class="subhead team-subhead"><h3>成员与职责</h3><small>${members.length} 位成员</small></div>
+      <div class="team-members">${members.map(person=>`<button type="button" data-action="staff-detail" data-id="${escape(person.id)}"><span class="tile-icon" aria-hidden="true">${staffGlyph(person.id)}</span><strong>${escape(person.name)}</strong><small>${escape(person.specialty||'通用')}</small><p>${escape(person.description)}</p></button>`).join('')||empty('点「管理成员」选择参与协作的 AI 员工，随后可在这里查看职责和能力配置。')}</div>
+      ${file?`<section class="team-output"><div class="team-delivery-head"><div><h3>交付文件</h3><p>${escape(file.hint||file.title||file.name)}</p></div>${fileButton(file)}</div>
+        ${sections.length?`<dl class="delivery-outline">${sections.map(section=>`<div><dt>${escape(section.title)}</dt><dd>${escape(section.text)}</dd></div>`).join('')}</dl>`:''}</section>`:''}`:empty('创建团队后配置成员。')}</section></div></div>`;
 }
 function database() {
   const cards=state.database.map(item=>{
@@ -834,7 +860,8 @@ function database() {
     return `<article class="panel database-connection source-card">
       <header><span class="tile-icon">${icon('database')}</span><div><h2>${escape(item.name)}</h2><p>${escape(item.description)}</p></div></header>
       <div class="schema-caption"><code>${escape(source?.table||item.table||item.database||'—')}</code><small>${fields.length?fields.length+' 个字段':'待连接'}</small></div>
-      ${structure}<footer><small>${escape(item.engine)}</small><div class="row-actions">${item.source?button('查询数据','query-db',{id:item.id,glyph:'database'}):''}${source||!canManageConnections()?'':button(item.engine==='CSV'?'替换数据':item.remoteConnection?'编辑':'连接',item.engine==='CSV'?'import-csv':'edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></footer>
+      ${structure}${source?.analysis?`<section class="source-analysis"><h3>${escape(source.analysis.title)}</h3><p>${escape(source.analysis.description)}</p>
+      ${button('查看核对明细','query-db',{id:item.id,extra:'data-query="analysis"',glyph:'arrow-right'})}</section>`:''}<footer><small>${escape(item.engine)}</small><div class="row-actions">${item.source?button('查询数据','query-db',{id:item.id,glyph:'database'}):''}${source||!canManageConnections()?'':button(item.engine==='CSV'?'替换数据':item.remoteConnection?'编辑':'连接',item.engine==='CSV'?'import-csv':'edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></footer>
     </article>`;
   });
   return `<div class="page database-page">${heading('数据库','查看数据源的字段和口径，打开查询即可核对实际记录。',canManageConnections()?'<div class="row-actions">'+button('导入 CSV','import-csv',{glyph:'upload'})+button('新增连接','edit',{primary:true,glyph:'plus',extra:'data-collection="database"'})+'</div>':'')}
@@ -906,7 +933,7 @@ function accountPanel(){
 }
 function teamPage(){
   const members=teamDirectory?.members||[],invites=teamDirectory?.invites||[];
-  return `<div class="page">${heading('团队成员','管理这个工作空间的成员、权限和邀请。',account.role==='admin'?button('邀请成员','team-invite',{primary:true,glyph:'plus'}):'')}${accountPanel()}
+  return `<div class="page">${heading('团队成员','管理员可邀请或移除成员。加入团队后，同事可使用共享资料和已授权的业务连接。',account.role==='admin'?button('邀请成员','team-invite',{primary:true,glyph:'plus'}):'')}${accountPanel()}
   <section class="panel connection-list"><h2>成员</h2>${members.map(m=>`<div class="connection-row"><div><strong>${escape(m.display)}</strong><small>${escape(m.login)}</small></div>${badge(m.role==='admin'?'管理员':'成员')}${account.role==='admin'&&m.role==='member'?button('移除','team-remove',{id:m.id}):''}</div>`).join('')||'<p>正在加载成员…</p>'}</section>
   ${account.role==='admin'?`<section class="panel connection-list"><h2>邀请码</h2>${invites.map(i=>`<div class="connection-row"><div><strong>${escape(i.note||'团队邀请')}</strong><small>有效至 ${beijingTime(i.expires*1000,true)}</small></div>${badge(i.used===1?'已使用':i.used===2?'已撤销':i.expires*1000<Date.now()?'已过期':'待使用')}${!i.used&&i.expires*1000>Date.now()?button('撤销','team-revoke',{id:i.id}):''}</div>`).join('')||empty('还没有发出邀请')}</section>`:''}</div>`;
 }
@@ -947,7 +974,7 @@ function models() {
   return `<div class="page models-page">${heading('模型管理','连接自己的模型，为对话、文档和后台任务选择默认服务。',canManageConnections()?button('添加模型','edit-model',{glyph:'plus',primary:true}):'')}
     <section class="model-connection panel"><span class="model-symbol">${icon('boxes')}</span><div><small>对话模型</small><h2>${escape(connection.available?connection.name:'实时模型')}</h2></div>
     ${badge(modelLabel(),connection.available?'success':connection.checking?'':'danger')}</section>
-    <section class="panel connection-list"><div class="view-heading"><h2>模型连接</h2>${button('检测当前模型','refresh-model',{glyph:'refresh-cw',disabled:connection.checking})}</div>
+    <section class="panel connection-list"><div class="view-heading"><h2>模型连接</h2><div class="row-actions">${link('接入指南','help/models','book-open')}${button('检测当前模型','refresh-model',{glyph:'refresh-cw',disabled:connection.checking})}</div></div>
     <div class="connection-row"><div><strong>平台模型</strong><small>工作台提供的默认服务</small></div>${!active?badge('当前默认','success'):canManageConnections()?button('设为默认','activate-model',{id:'platform'}):''}</div>
     ${modelConnections.map(item=>`<div class="connection-row"><div><strong>${escape(item.name)}</strong><small>${escape(item.model)} · ${escape(item.endpoint)}</small></div><div class="row-actions">${item.active?badge('当前默认','success'):canManageConnections()?button('设为默认','activate-model',{id:item.id}):''}${canManageConnections()?button('编辑','edit-model',{id:item.id})+button('删除','remove-model',{id:item.id}):''}</div></div>`).join('')}
     ${connectionCatalogError?`<p role="alert">${escape(connectionCatalogError)} ${button('重试','reload-connections')}</p>`:''}</section>
@@ -980,7 +1007,7 @@ async function savePreferences(text,enabled){
 }
 
 function settings() {
-  return `<div class="page">${heading('个人设置','管理对话偏好和工具配置。')}
+  return `<div class="page">${heading('个人设置','保存常用的报告语言、统计口径和输出格式，也可在这里管理对话使用的外部工具。')}
     ${accountPanel()}<div class="page-tabs" role="group" aria-label="个人设置视图">${[['memory','记忆'],['mcp','MCP 工具']].map(([id,label])=>button(label,'personal-tab',{id,extra:`aria-pressed="${personalTab===id}"`})).join('')}</div>
     ${personalTab==='memory'?`<section class="panel personal-panel"><div class="side-title"><h2>对话记忆</h2>${button(state.memoryEnabled?'已开启':'已关闭','memory-toggle',{extra:`aria-pressed="${state.memoryEnabled}"`})}</div><p>在此编辑会用于后续实时对话的偏好。</p>
       <form class="edit-form" data-form="memory"><label>表达与交付偏好<textarea name="preferences" rows="4" maxlength="800">${escape(state.preferences)}</textarea></label>
@@ -995,7 +1022,7 @@ function systemSettings() {
     <div class="host-fields"><label>应用名称<input name="brandName" maxlength="35" required value="${escape(brandName())}"></label>
       <label>工作空间名称<input name="name" maxlength="35" required value="${escape(state.profile.name)}"></label></div>
     <div class="brand-uploads">${[['logo','应用 Logo'],['icon','浏览器图标']].map(([id,label])=>`<label>${label}<span class="brand-image-sample"><img data-current-image="${id}" src="${escape(brandImage(id))}" alt=""></span><input type="file" name="${id}" accept="image/png,image/jpeg,image/webp"></label>`).join('')}</div>
-    <small>支持 PNG、JPG 或 WebP，每张图片最多 200 KB。</small>
+    <small>侧栏和登录页使用横向字标，浏览器标签使用方形图标。支持 PNG、JPG 或 WebP，每张最多 200 KB。</small>
     <div class="row-actions">${account?'':button('恢复示例数据','reset')}<button class="button primary" type="submit">保存设置</button></div>
     </form></section>
     <aside class="panel brand-preview"><div class="view-heading"><h2>外观预览</h2></div>
@@ -1717,9 +1744,9 @@ document.addEventListener('click',async event=>{
       themeMenu=false;state.profile.theme=id;save();render({bottom:false});document.querySelector('.theme-trigger')?.focus();break;
     case 'command-language': commandLanguage=commandLanguage==='zh'?'en':'zh';render({bottom:false});break;
     case 'show-history':
-      historyOpen=true;spaceOpen=false;go('chat');break;
+      historyRequested=true;historyOpen=true;spaceOpen=false;go('chat');break;
     case 'history':
-      historyOpen=!historyOpen;
+      historyOpen=!historyOpen;historyRequested=historyOpen;
       if(historyOpen&&innerWidth<1540)spaceOpen=false;
       render({bottom:false});break;
     case 'space':
@@ -1849,7 +1876,8 @@ document.addEventListener('click',async event=>{
       const skill=byId('market',id),recipe=marketRecipes[id];
       const installed=state.skills.find(item=>item.marketId===id);
       modal(skill.name,`<div class="detail-block"><h3>适用任务</h3><p>${escape(skill.description)}</p></div>
-        ${recipe?`<div class="detail-block"><h3>示例指令</h3><blockquote class="prompt-sample">${escape(recipe.example)}</blockquote></div>`:''}
+        ${recipe?`<dl class="record-facts"><div><dt>准备材料</dt><dd>${escape(recipe.input)}</dd></div><div><dt>交付内容</dt><dd>${escape(recipe.output)}</dd></div></dl>
+        <div class="detail-block"><h3>验收要点</h3><p>${escape(recipe.check)}</p></div><div class="detail-block"><h3>示例指令</h3><blockquote class="prompt-sample">${escape(recipe.example)}</blockquote></div>`:''}
         <footer class="dialog-footer">${button('关闭','close')}${installed?button('在对话中使用','try-skill',{id:installed.id,primary:true}):button('安装技能','install',{id,primary:true})}</footer>`);
       break;
     }
@@ -1880,7 +1908,7 @@ document.addEventListener('click',async event=>{
       const item=byId('database',id),quote=item.engine==='MySQL'?String.fromCharCode(96):'"';
       const quoted=quote+String(item.table).replaceAll(quote,quote+quote)+quote;
       const db=databases[item.source]||{schema:(item.columns||[]).map(c=>c.join(' ')).join(' · '),sql:'SELECT * FROM '+quoted+' LIMIT 20'};
-      modal(item.name,'<form class="edit-form" data-form="db-query" data-source="'+item.source+'"><p>'+escape(db.schema)+'</p><label>只读 SQL<textarea name="sql" rows="4" maxlength="1800" required>'+escape(db.sql)+'</textarea></label><button class="button primary" type="submit">运行查询</button><output aria-live="polite"></output></form>',true);
+      modal(item.name,'<form class="edit-form" data-form="db-query" data-source="'+item.source+'"><p>'+escape(db.schema)+'</p><label>只读 SQL<textarea name="sql" rows="4" maxlength="1800" required>'+escape(control.dataset.query==='analysis' && db.analysis ? db.analysis.sql : db.sql)+'</textarea></label><button class="button primary" type="submit">运行查询</button><output aria-live="polite"></output></form>',true);
       dialog.querySelector('form').requestSubmit();break;
     }
     case 'create-invite':
@@ -2016,7 +2044,7 @@ document.addEventListener('click',async event=>{
     case 'install': {
       if(state.skills.some(item=>item.marketId===id))break;
       const skill=byId('market',id);
-      state.skills.unshift({...skill,instructions:skill.instructions||marketRecipes[id]?.example||'',id:uid(),marketId:id});
+      state.skills.unshift({...skill,instructions:skill.instructions||(marketRecipes[id]?[marketRecipes[id].example,marketRecipes[id].check].join('\n'):''),id:uid(),marketId:id});
       save();if(dialog.open)dialog.close();render();toast('已添加到我的技能');break;
     }
     case 'run': await runTask(byId('tasks',id));break;
@@ -2209,6 +2237,12 @@ window.addEventListener('hashchange',()=>{
   if ((key||'home')!==page || detail!==routeDetail){mobileMenu=false;render();}
   if(key==='tasks')void refreshSchedule();
   if(key==='users'&&account)refreshTeam().catch(e=>toast(e.message));
+});
+compactChatWidth.addEventListener('change',event=>{
+  if(event.matches && historyOpen && !historyRequested) {
+    historyOpen=false;
+    if(page==='chat')render({bottom:false});
+  }
 });
 window.addEventListener('resize',paintCharts);
 window.addEventListener('online',()=>{if(account&&!syncController)location.reload();});
