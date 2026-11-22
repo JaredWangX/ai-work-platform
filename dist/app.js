@@ -186,13 +186,17 @@ function link(label, key, glyph, primary = false) {
 const badge = (text, kind = '') => `<span class="badge ${kind}">${escape(text)}</span>`;
 const empty = text => `<p class="empty">${escape(text)}</p>`;
 function heading(title, description, actions = '') {
-  return `<div class="section-head"><div><h1>${escape(title)}</h1><p>${escape(description)}</p></div>${actions}</div>`;
+  const glyph=page!=='home'&&groups.flatMap(([,links])=>links).find(([key])=>key===page)?.[2];
+  return `<div class="section-head"><div class="page-identity">${glyph?`<span class="page-symbol" aria-hidden="true">${icon(glyph)}</span>`:''}<div><h1>${escape(title)}</h1><p>${escape(description)}</p></div></div>${actions}</div>`;
 }
 function nav() {
+  const sections=groups.map(([group,links]) => `<div class="nav-group" role="group" aria-label="${group}">
+    <p aria-hidden="true">${group==='工作台'?'工作空间':group}</p>
+    ${links.map(([key,name,glyph]) => `<a href="#${key}" class="nav-link" title="${name}" ${page===key?'aria-current="page"':''}>${icon(glyph)}<span>${name}</span></a>`).join('')}</div>`);
   return `<aside class="sidebar${mobileMenu ? ' open' : ''}" id="navigation">
     <div class="brand-row"><a class="brand" href="#home" aria-label="${escape(brandName())} 工作台"><img src="${escape(brandImage('logo'))}" width="154" height="51" alt="${escape(brandName())}"><img class="brand-mark" src="${escape(brandImage('icon'))}" width="29" height="29" alt=""></a>
       ${button('','fold-nav',{glyph:'panel-left',title:'收起主导航'})}</div>
-    <nav aria-label="工作空间" class="navigation">${groups.flatMap(([,links])=>links).map(([key,name,glyph]) => `<a href="#${key}" class="nav-link" title="${name}" ${page === key ? 'aria-current="page"' : ''}>${icon(glyph)}<span>${name}</span></a>`).join('')}</nav>
+    <nav aria-label="工作空间" class="navigation">${sections.join('')}</nav>
     <a class="account" href="#settings" aria-label="个人设置"><span class="account-mark">${icon('user-round')}</span><span><strong>${escape(state.profile.name)}</strong><small>团队工作空间</small></span></a>
   </aside>`;
 }
@@ -247,7 +251,7 @@ function dashboard() {
       ${homeTab==='cases'?`<section class="case-library" aria-label="参考案例">${featuredCases.map(example=>dossierCard(example)).join('')}</section>`:`
       <div class="panel rows">${recent.map(item => `<button class="list-link recent-work" data-action="open-chat" data-id="${item.id}">${icon('messages-square')}<strong>${escape(item.title)}</strong><span>${escape(chatFiles(item)[0]?.name || '')}</span><time>${beijingTime(item.updated)}</time></button>`).join('') || empty('暂无对话')}</div>`}
       <div class="subhead"><h2>我的 AI 员工</h2>${link('查看全部 '+state.staff.length+' 位','staff')}</div>
-      <div class="staff-grid">${state.staff.slice(0,3).map((person,index) => `<article class="panel staff-card"><span class="staff-symbol" aria-hidden="true">${['📊','🔎','📝'][index]}</span><h3><button class="card-name" data-action="staff-detail" data-id="${escape(person.id)}" title="${escape(person.name)}">${escape(person.name)}</button></h3><p>${escape(person.description)}</p>
+      <div class="staff-grid">${state.staff.slice(0,3).map(person => `<article class="panel staff-card"><span class="staff-symbol" aria-hidden="true">${staffGlyph(person.id)}</span><h3><button class="card-name" data-action="staff-detail" data-id="${escape(person.id)}" title="${escape(person.name)}">${escape(person.name)}</button></h3><p>${escape(person.description)}</p>
          ${button('发起对话 →','staff-chat',{id:person.id})}</article>`).join('') || empty('暂无 AI 员工')}</div>
 
     </div><aside class="home-side">
@@ -526,7 +530,7 @@ function projects() {
   const files=[...new Set(state.projects.map(item=>item.file).filter(Boolean))].map(id=>byId('files',id)).filter(Boolean);
   const comments=state.projects.flatMap(item=>(item.comments||[]).map(comment=>({item,...comment})));
   const board=`<div class="board">${statusNames.map((status,index) => `<section class="board-column"><h2><span class="lane-dot lane-${index}"></span>${status}${badge(state.projects.filter(item=>item.status===status).length)}</h2>
-    ${state.projects.filter(item=>item.status===status).map(item=>`<article class="panel board-card"><h3><button class="plain project-detail-link" title="${escape(item.name)}" data-action="project-detail" data-id="${item.id}">${escape(item.name)}</button></h3><p>${escape(item.description)}</p><div class="board-bottom"><span>${escape(item.owner || '待分配')}</span>${badge(status==='已完成'?'已完成':item.due||status)}</div></article>`).join('') || empty('暂无任务')}</section>`).join('')}</div>`;
+    ${state.projects.filter(item=>item.status===status).map(item=>`<article class="panel board-card"><h3><button class="plain project-detail-link" title="${escape(item.name)}" data-action="project-detail" data-id="${item.id}">${escape(item.name)}</button></h3><p>${escape(item.description)}</p><div class="board-bottom"><span>${escape(item.owner || '待分配')}</span><span class="board-evidence">${byId('files',item.file)?`<span title="有关联文件" aria-label="有关联文件">${icon('paperclip')}</span>`:''}${item.comments?.length?`<span aria-label="${item.comments.length} 条讨论" title="${item.comments.length} 条讨论">${icon('message-square')}${item.comments.length}</span>`:''}</span>${badge(status==='已完成'?'已完成':item.due||status)}</div></article>`).join('') || empty('暂无任务')}</section>`).join('')}</div>`;
   const tabs=[['overview','概览'],['board','任务看板'],['files','项目文件'],['activity','活动记录']];
   const projectTab=tabs.some(([key])=>key===routeDetail)?routeDetail:'board';
   let content=board;
@@ -580,7 +584,7 @@ function tasks() {
   const tabs=`<div class="page-tabs" role="group" aria-label="任务视图">${[['list','任务列表 '+state.tasks.length],['types','任务类型 '+tags.length]].map(([id,label])=>button(label,'task-view',{id,extra:`aria-pressed="${taskView===id}"`})).join('')}</div>`;
   if(taskView==='types') return `<div class="page tasks-page">${heading('自动化任务','让重复工作，按计划完成。')}${tabs}${taskSchedule(tags)}</div>`;
   return `<div class="page tasks-page">${heading('自动化任务','让重复工作，按计划完成。')}${tabs}
-    <div class="metrics panel task-metrics">${[['全部任务',state.tasks.length],['执行中',state.tasks.filter(item=>loading.has(item.id)).length],['已下线',state.tasks.filter(item=>!item.enabled).length],['最近成功',state.tasks.filter(item=>item.runs[0]&&item.runs[0].status!=='failed').length],['最近失败',state.tasks.filter(item=>item.runs[0]?.status==='failed').length]].map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join('')}</div>
+    <div class="metrics panel task-metrics">${[['全部任务',state.tasks.length],['执行中',state.tasks.filter(item=>loading.has(item.id)).length],['已下线',state.tasks.filter(item=>!item.enabled).length],['最近成功',state.tasks.filter(item=>item.runs[0]?.status==='success').length],['最近失败',state.tasks.filter(item=>item.runs[0]?.status==='failed').length]].map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join('')}</div>
     ${filters}<div class="panel table"><table class="responsive-table"><thead><tr><th scope="col">任务 / 类型</th><th scope="col">触发规则</th><th scope="col">调度</th><th scope="col">最近执行</th><th scope="col">操作</th></tr></thead><tbody id="task-rows">${taskRows()}</tbody></table></div>
     <p class="footnote">共 ${state.tasks.length} 项任务 · 北京时间（UTC+8） · 保存并启用任务后，服务器会按计划执行</p></div>`;
 }
@@ -610,7 +614,7 @@ function taskHistory(task) {
   const executions=task.runs;
   const average=executions.length ? Math.round(executions.reduce((total,item)=>total+(item.seconds||0),0)/executions.length) : 0;
   const successes=executions.filter(item=>item.status==='success').length;
-  const visible=executions.map((run,index)=>({run,index})).filter(({run})=>runFilter==='all' || (run.status==='failed' ? runFilter==='failed' : runFilter==='success'));
+  const visible=executions.map((run,index)=>({run,index})).filter(({run})=>runFilter==='all' || run.status===runFilter);
   const current=visible.find(item=>item.index===runIndex)||visible[0];
   return `<div class="page task-history-page"><a href="#tasks" class="back-link">返回任务列表</a>
     ${heading(task.name,'AI 自动化 · '+task.frequency+' '+task.time+' · 北京时间',button(loading.has(task.id)?'执行中':'执行任务','run',{id:task.id,glyph:'play',primary:true,disabled:loading.has(task.id)}))}
@@ -653,6 +657,8 @@ function knowledgeGraph(note) {
 }
 function knowledge() {
   const note=byId('knowledge',activeNote)||state.knowledge[0];
+  const paragraphs=note?.body.split(/\n\n+/)||[];
+  const outline=paragraphs.flatMap((part,index)=>part.includes('\n')?[button(part.split('\n')[0],'note-section',{id:String(index)})]:[]);
   const outgoing=note ? state.knowledge.filter(item=>item.id===note.related) : [];
   const incoming=note ? state.knowledge.filter(item=>item.related===note.id) : [];
   const groups=Object.groupBy(state.knowledge,item=>item.description||'其他');
@@ -662,12 +668,12 @@ function knowledge() {
       <label class="search-field">${icon('search')}<input id="note-search" aria-label="搜索笔记" type="search" placeholder="搜索笔记、标签、内容…" data-filter="#notes"></label>
       <div class="segments" role="group" aria-label="知识库模式">${[['read','阅读','book-open'],['graph','图谱','workflow']].map(([id,label,glyph])=>button(label,'note-view',{id,glyph,extra:`aria-pressed="${noteView===id}"`})).join('')}</div>
       ${button('新建笔记','edit',{primary:true,glyph:'plus',extra:'data-collection="knowledge"'})}</header>
-    <div class="vault-body"><aside class="vault-tree"><h2>文件</h2>
-      <div id="notes">${Object.entries(groups).map(([label,items],index)=>`<details class="note-folder ${graphTones[index%graphTones.length]}" open><summary>${icon('chevron-down')}<i></i>${escape(label)}<small>${items.length}</small></summary>${items.map(item=>`<div data-search="${escape(item.name+' '+item.description+' '+item.body)}"><button class="note-link${item.id===note?.id?' active':''}" data-action="note" data-id="${item.id}" aria-pressed="${item.id===note?.id}">${icon('file-text')}${escape(item.name)}</button></div>`).join('')}</details>`).join('')||empty('暂无笔记')}</div></aside>
+    <div class="vault-body"><aside class="vault-tree"><details class="note-index"${innerWidth>720?' open':''}><summary>笔记目录 <small>${state.knowledge.length} 篇</small>${icon('chevron-down')}</summary>
+      <div id="notes">${Object.entries(groups).map(([label,items],index)=>`<details class="note-folder ${graphTones[index%graphTones.length]}" open><summary>${icon('chevron-down')}<i></i>${escape(label)}<small>${items.length}</small></summary>${items.map(item=>`<div data-search="${escape(item.name+' '+item.description+' '+item.body)}"><button class="note-link${item.id===note?.id?' active':''}" data-action="note" data-id="${item.id}" aria-pressed="${item.id===note?.id}">${icon('file-text')}${escape(item.name)}</button></div>`).join('')}</details>`).join('')||empty('暂无笔记')}</div></details></aside>
     <article class="vault-reader">${!note ? empty('选择一篇笔记查看内容。') : noteView==='graph' ? knowledgeGraph(note):
       `<header class="note-heading"><div><p>${escape(note.description || '笔记')}</p><h2>${escape(note.name)}</h2></div><div class="row-actions">${button('编辑','edit',{id:note.id,extra:'data-collection="knowledge"'})}${button('删除','delete',{id:note.id,extra:'data-collection="knowledge"'})}</div></header>
-        <div class="note-body">${note.body.split(/\n\n+/).map(paragraph=>{const [title,...lines]=paragraph.split('\n');return lines.length?`<section><h3>${escape(title)}</h3><p class="preserve-lines">${escape(lines.join('\n'))}</p></section>`:`<p>${escape(title)}</p>`;}).join('')}</div>`}</article>
-    <aside class="vault-links"><div><h3>出链 <small>${outgoing.length}</small></h3>${outgoing.map(noteButton).join('') || '<p>暂无引用</p>'}</div><div><h3>入链 · 笔记 <small>${incoming.length}</small></h3>${incoming.map(noteButton).join('') || '<p>暂无反向引用</p>'}</div>
+        <div class="note-body">${paragraphs.map((paragraph,index)=>{const [title,...lines]=paragraph.split('\n');return lines.length?`<section><h3 id="note-section-${index}" tabindex="-1">${escape(title)}</h3><p class="preserve-lines">${escape(lines.join('\n'))}</p></section>`:`<p>${escape(title)}</p>`;}).join('')}</div>`}</article>
+    <aside class="vault-links">${noteView==='read'&&outline.length?`<div class="article-outline"><h3>本文目录</h3>${outline.join('')}</div>`:''}<div><h3>引用的笔记 <small>${outgoing.length}</small></h3>${outgoing.map(noteButton).join('') || '<p>暂无引用</p>'}</div><div><h3>引用本文的笔记 <small>${incoming.length}</small></h3>${incoming.map(noteButton).join('') || '<p>暂无反向引用</p>'}</div>
       ${note&&noteView==='graph'?button('阅读当前笔记','note-view',{id:'read',glyph:'book-open'}):''}</aside>
     </div></div></div>`;
 }
@@ -729,6 +735,18 @@ const marketStaff=[
   {id:'market-feedback',name:'客户反馈助手',specialty:'客服运营',description:'按产品问题、使用建议与售后咨询归类反馈，保留原话并整理回访记录。'},
   {id:'market-meeting',name:'会议纪要助手',specialty:'会议纪要',description:'提取会议决定、负责人和截止日期，单列尚未决定的事项。'},
 ];
+const marketRecipes={
+  meeting:{output:'会议决定与行动清单',example:'把这份会议记录整理为已决定事项、负责人、截止日期和待确认问题。'},
+  sheet:{output:'问题行与复核清单',example:'检查这份表格，逐行标出缺失字段、重复记录和格式不一致的值。'},
+  format:{output:'分级标题与交付清单',example:'整理这份报告的标题层级，把需要跟进的事项汇总为清单。'},
+};
+const staffGlyph=id=>icon(({s1:'chart-no-axes-combined',s2:'search',s3:'file-text'})[id]||'bot');
+function cardExcerpt(label,text) {
+  return `<div class="card-excerpt"><small>${escape(label)}</small><p>${escape(text)}</p></div>`;
+}
+function bindingLine(label,value) {
+  return `<div class="binding-line"><span>${escape(label)}</span><strong title="${escape(value)}">${escape(value)}</strong></div>`;
+}
 function collection(key) {
   const [title, description, action] = collections[key];
   const options = button(action,'edit',{primary:true,glyph:'plus',extra:`data-collection="${key}"`});
@@ -740,12 +758,26 @@ function collection(key) {
     <div class="cards-grid" id="collection-list">${items.map(item => {
     const installed = state.skills.some(skill=>skill.marketId === item.id);
     const hired=marketList&&!!byId('staff',item.id);
-    const glyph=key==='staff'?({s1:'📊',s2:'🔎',s3:'📝'}[item.id]||icon('bot')):icon(groups.flatMap(([,links])=>links).find(([name])=>name===key)[2]);
+    let binding='',context='';
+    if(key==='staff'&&!marketList){
+      const names=(item.skills||[]).map(id=>byId('skills',id)?.name).filter(Boolean);
+      binding=bindingLine('已绑技能',names.join('、')||'尚未配置');
+      const sources=[item.vault?'团队业务资料':'',byId('database',item.database)?.name].filter(Boolean);
+      context=bindingLine('可用资料',sources.join('、')||'可在对话中添加附件');
+    }else if(key==='skills'){
+      const people=state.staff.filter(person=>person.skills?.includes(item.id));
+      binding=bindingLine('使用员工',people.map(person=>person.name).join('、')||'可在对话中单独使用');
+      if(item.instructions)context=cardExcerpt('执行要求',item.instructions);
+    }else if(key==='market'&&marketRecipes[item.id]){
+      binding=bindingLine('交付内容',marketRecipes[item.id].output);
+      context=cardExcerpt('示例指令',marketRecipes[item.id].example);
+    }
+    const glyph=key==='staff'?staffGlyph(item.id):icon(groups.flatMap(([,links])=>links).find(([name])=>name===key)[2]);
     return `<article class="panel collection-card${key==='staff'?' employee-card':''}" data-search="${escape(item.name+' '+item.description)}"><header><span class="tile-icon" aria-hidden="true">${glyph}</span><h2 title="${escape(item.name)}">${escape(item.name)}</h2></header><p>${escape(item.description)}</p>
-    <div class="collection-footer"><div class="card-meta">${item.specialty ? badge(item.specialty) : ''}</div>
-    <div class="row-actions">${marketList ? button(hired?'已加入':'聘用','hire-staff',{id:item.id,disabled:hired,primary:!hired}) : key==='market' ? button(installed?'已添加':'安装','install',{id:item.id,disabled:installed,primary:!installed})
+    ${context}${binding}<div class="collection-footer"><div class="card-meta">${item.specialty ? badge(item.specialty) : ''}</div>
+    <div class="row-actions">${marketList ? button(hired?'已加入':'聘用','hire-staff',{id:item.id,disabled:hired,primary:!hired}) : key==='market' ? button('预览','market-preview',{id:item.id})+button(installed?'已添加':'安装','install',{id:item.id,disabled:installed,primary:!installed})
      : `${key==='staff'?button('对话','staff-chat',{id:item.id,primary:true})+button('','staff-detail',{id:item.id,glyph:'settings',title:'能力配置'}):''}${key==='skills'?button('查看详情','skill-detail',{id:item.id,primary:true}):''}${button('编辑','edit',{id:item.id,extra:`data-collection="${key}"`})}${button('','delete',{id:item.id,glyph:'trash',title:'删除 '+item.name,extra:`data-collection="${key}"`})}`}</div></div></article>`;
-  }).join('') || empty('暂无条目')}</div></div>`;
+  }).join('') || empty('暂无条目')}</div><p class="empty search-empty" role="status" hidden>没有匹配的条目，试试其他名称或说明。</p></div>`;
 }
 function staffDetail(person) {
   const tasks = state.tasks.filter(task => task.assignee === person.id);
@@ -768,24 +800,42 @@ function teams() {
   return `<div class="page">${heading('专家团队','查看不同专长的助手怎样分工，并继续处理产物。',button('创建团队','edit',{primary:true,glyph:'plus',extra:'data-collection="teams"'}))}
     <div class="team-layout"><aside>${state.teams.map(item=>`<button class="team-select panel" type="button" data-action="select-team" data-id="${item.id}" aria-pressed="${item.id===team?.id}"><strong>${escape(item.name)}</strong><small>${(item.members||[]).filter(id=>byId('staff',id)).length} 位成员 · ${escape(item.specialty)}</small></button>`).join('')||empty('暂无团队')}</aside>
     <section class="panel team-detail">${team?`<div class="side-title"><h2>${escape(team.name)}</h2>${button('管理成员','edit',{id:team.id,extra:'data-collection="teams"'})}</div><p>${escape(team.description)}</p>
-      <div class="team-members">${members.map(person=>`<article><span class="tile-icon">${icon('bot')}</span><h3>${escape(person.name)}</h3><small>${escape(person.specialty)}</small></article>`).join('')||empty('请选择团队成员')}</div>
-      ${file?`<div class="team-output"><h3>协作产物</h3><p>${escape(file.hint||'可打开并继续补充。')}</p>${fileButton(file)}</div>`:''}</section>`:empty('创建团队后配置成员。')}</div></div>`;
+      <div class="subhead team-subhead"><h3>团队分工</h3><small>${members.length} 位成员</small></div>
+      <div class="team-members">${members.map(person=>`<button type="button" data-action="staff-detail" data-id="${escape(person.id)}"><span class="tile-icon">${icon('bot')}</span><strong>${escape(person.name)}</strong><small>${escape(person.specialty||'通用')}</small><p>${escape(person.description)}</p></button>`).join('')||empty('请选择团队成员')}</div>
+      ${file?`<div class="team-output"><h3>协作产物</h3><p>${escape(file.hint||'可打开并继续补充。')}</p>${fileButton(file)}</div>`:''}`:empty('创建团队后配置成员。')}</section></div></div>`;
 }
 function database() {
-  return `<div class="database-page"><div class="database-title"><h1>数据库</h1></div><div class="page">
-    <div class="database-list-head"><div><h2>数据库连接</h2><small>共 ${state.database.length} 个</small></div>${button('新增','edit',{glyph:'plus',extra:'data-collection="database"'})}</div>
-    <div class="panel database-list">
-    ${state.database.map(item => `<article class="database-connection"><div><h3 title="${escape(item.name)}">${escape(item.name)}</h3><p>${escape(item.description)}</p></div><span>${escape(item.engine)}</span>
-      <code>${item.source?escape(databases[item.source].table):escape(item.host)+':'+escape(item.port)+'/'+escape(item.database)}</code><div class="row-actions">${item.source?button('查询数据','query-db',{id:item.id,glyph:'database'}):button('检查配置','check-db',{id:item.id})+button('编辑','edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></article>`).join('') || empty('暂无连接配置')}
-    </div><p class="footnote">演示库连接服务器上的 SQLite，支持只读查询。自行新增的连接为本地配置草稿。</p></div></div>`;
+  const cards=state.database.map(item=>{
+    const source=Object.hasOwn(databases,item.source)?databases[item.source]:null;
+    const fields=source?source.schema.split(/\s*·\s*/):[];
+    const structure=source
+      ? `<dl class="schema-fields">${fields.map(field=>{const cut=field.indexOf(' ');return `<div><dt><code>${escape(field.slice(0,cut))}</code></dt><dd>${escape(field.slice(cut+1))}</dd></div>`;}).join('')}</dl>`
+      : `<dl class="schema-fields"><div><dt>主机</dt><dd>${escape(item.host||'—')}</dd></div><div><dt>端口</dt><dd>${escape(item.port||'—')}</dd></div></dl>`;
+    return `<article class="panel database-connection source-card">
+      <header><span class="tile-icon">${icon('database')}</span><div><h2>${escape(item.name)}</h2><p>${escape(item.description)}</p></div></header>
+      <div class="schema-caption"><code>${escape(source?.table||item.database||'—')}</code><small>${source?fields.length+' 个字段':'本地连接配置'}</small></div>
+      ${structure}<footer><small>${escape(item.engine)}</small><div class="row-actions">${source?button('查询数据','query-db',{id:item.id,glyph:'database'}):button('检查配置','check-db',{id:item.id})+button('编辑','edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></footer>
+    </article>`;
+  });
+  return `<div class="page database-page">${heading('数据库','查看数据源的字段和口径，打开查询即可核对实际记录。',button('新增连接','edit',{primary:true,glyph:'plus',extra:'data-collection="database"'}))}
+    <div class="view-heading"><h2>数据源</h2><span>${cards.length} 个连接</span></div>
+    <div class="sources-grid">${cards.join('')||empty('暂无连接配置')}</div>
+    <p class="footnote">演示库支持只读 SQL。自行新增的连接保存在当前浏览器。</p></div>`;
 }
 function modelLabel() {
   return connection.checking ? '检测模型中' : connection.available ? '模型已连接' : '模型连接异常';
 }
 function models() {
-  return `<div class="page">${heading('模型管理','查看此工作空间的对话模式和可用模型。')}
-    <section class="panel model-list"><div class="database-header"><div><h2>模型配置</h2><small>${modelLabel()}</small></div>${button('刷新连接状态','refresh-model',{glyph:'refresh-cw'})}</div>
-      <div class="database-record"><span class="tile-icon">${icon('boxes')}</span><div class="database-info"><h3>${escape(connection.name || '实时模型')}</h3><p>${connection.available ? '处理实时对话与手动任务。' : '每次发送都会请求实时模型。已保存的案例也可以单独查看。'}</p><div class="row-actions">${badge(modelLabel(),connection.available?'success':'')}${connection.available?badge('默认对话模型'):''}</div></div>${link('打开对话','chat')}</div></section></div>`;
+  const samples=['case-weekly-doc','case-weekly-sheet','case-launch-deck'].map(id=>byId('files',id)).filter(Boolean);
+  return `<div class="page models-page">${heading('模型管理','查看实时连接，选择用模型完成哪种工作。',button('刷新连接状态','refresh-model',{glyph:'refresh-cw',disabled:connection.checking}))}
+    <section class="model-connection panel"><span class="model-symbol">${icon('boxes')}</span><div><small>对话模型</small><h2>${escape(connection.available?connection.name:'实时模型')}</h2></div>
+    ${badge(modelLabel(),connection.available?'success':connection.checking?'':'danger')}</section>
+    <div class="model-paths">
+      <a class="panel entry-link" href="#chat"><span class="tile-icon">${icon('messages-square')}</span><span><strong>发起对话</strong><small>引用资料，分析数据，生成可编辑文件。</small></span>${icon('arrow-up-right')}</a>
+      <a class="panel entry-link" href="#tasks"><span class="tile-icon">${icon('clock')}</span><span><strong>安排定时任务</strong><small>设置执行时间，按计划生成结果。</small></span>${icon('arrow-up-right')}</a>
+    </div>
+    ${samples.length?`<section class="panel delivery-samples"><div class="view-heading"><h2>案例交付物</h2>${link('查看文件','files')}</div><div>${samples.map(file=>fileButton(file,true)).join('')}</div></section>`:''}
+  </div>`;
 }
 function users() {
   const invites=state.invites;
@@ -794,7 +844,7 @@ function users() {
     :button('生成邀请码','create-invite',{primary:true,glyph:'plus'}))}
     <div class="page-tabs" role="group" aria-label="用户管理视图">${[['users','用户'],['invites','邀请码']].map(([id,label])=>button(label,'account-tab',{id,extra:`aria-pressed="${accountTab===id}"`})).join('')}</div>
     ${accountTab==='users'?`<section class="panel table"><div class="database-header"><h2>用户 · ${state.users.length} 人</h2></div>
-    <table class="responsive-table"><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${state.users.map(user=>`<tr><td data-label="用户名"><strong>${escape(user.description)}</strong><small>${escape(user.name)}</small></td><td data-label="角色">${badge(user.specialty)}</td><td data-label="状态">${badge('正常','success')}</td><td data-label="操作"><div class="row-actions">${button('编辑','edit',{id:user.id,extra:'data-collection="users"'})}${button('删除','delete',{id:user.id,extra:'data-collection="users"'})}</div></td></tr>`).join('')}</tbody></table></section>`:
+    <table class="responsive-table"><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${state.users.map(user=>`<tr><td data-label="用户名"><div class="member-identity"><span class="person-stamp" aria-hidden="true">${avatar(user.name||user.description||'成员')}</span><span><strong>${escape(user.description)}</strong><small>${escape(user.name)}</small></span></div></td><td data-label="角色">${badge(user.specialty)}</td><td data-label="状态">${badge('正常','success')}</td><td data-label="操作"><div class="row-actions">${button('编辑','edit',{id:user.id,extra:'data-collection="users"'})}${button('删除','delete',{id:user.id,extra:'data-collection="users"'})}</div></td></tr>`).join('')}</tbody></table></section>`:
     `<section class="panel database-list"><div class="database-header"><h2>邀请码</h2><small>共 ${invites.length} 个</small></div>
       ${invites.map(invite=>`<article class="database-record"><div class="database-info"><h3><code>${escape(invite.code)}</code></h3><p>${escape(invite.note)}</p></div>${badge(invite.status,invite.status==='未使用'?'success':'')}${invite.status==='未使用'?button('停用','disable-invite',{id:invite.id}):''}</article>`).join('')||empty('暂无邀请码记录')}</section>`}
     <p class="footnote">成员和邀请码是演示记录，保存在当前浏览器。</p></div>`;
@@ -803,23 +853,35 @@ function settings() {
   return `<div class="page">${heading('个人设置','管理对话偏好和工具配置。')}
     <div class="page-tabs" role="group" aria-label="个人设置视图">${[['memory','记忆'],['mcp','MCP 工具']].map(([id,label])=>button(label,'personal-tab',{id,extra:`aria-pressed="${personalTab===id}"`})).join('')}</div>
     ${personalTab==='memory'?`<section class="panel personal-panel"><div class="side-title"><h2>对话记忆</h2>${button(state.memoryEnabled?'已开启':'已关闭','memory-toggle',{extra:`aria-pressed="${state.memoryEnabled}"`})}</div><p>在此编辑会用于后续实时对话的偏好。</p>
-      <form class="edit-form" data-form="memory"><label>表达与交付偏好<textarea name="preferences" rows="4" maxlength="800">${escape(state.preferences)}</textarea></label><div class="row-actions"><button class="button primary" type="submit">保存偏好</button></div></form></section>`
-    : `<section class="panel database-list"><div class="database-header"><h2>MCP 服务器列表</h2>${button('新增','edit',{glyph:'plus',extra:'data-collection="tools"'})}</div>
+      <form class="edit-form" data-form="memory"><label>表达与交付偏好<textarea name="preferences" rows="4" maxlength="800">${escape(state.preferences)}</textarea></label>
+      <fieldset class="preference-examples"><legend>插入常用偏好</legend>${[['结论优先','先写结论，再列出支撑结论的事实。'],['标注来源','引用数据时注明来源、单位和统计周期。'],['明确分工','列出行动项时写清负责人和交付时间。']].map(([label,text])=>button(label,'insert-preference',{glyph:'plus',id:text})).join('')}</fieldset>
+      <div class="row-actions"><button class="button primary" type="submit">保存偏好</button></div></form></section>`
+    : `<section class="panel database-list tool-directory"><div class="database-header"><h2>MCP 服务器列表</h2>${button('新增','edit',{glyph:'plus',extra:'data-collection="tools"'})}</div>
       ${state.tools.map(tool=>`<article class="database-record"><span class="tile-icon">${icon('workflow')}</span><div class="database-info"><h3>${escape(tool.name)}</h3><p>${escape(tool.description)}</p><code>${escape(tool.url)}</code></div>${button('编辑','edit',{id:tool.id,extra:'data-collection="tools"'})}${button('删除','delete',{id:tool.id,extra:'data-collection="tools"'})}</article>`).join('')||empty('暂无工具配置')}</section><p class="footnote">公开演示仅保存工具配置。</p>`}</div>`;
 }
 function systemSettings() {
-  return `<div class="database-title"><h1>${icon('settings')} 设置</h1></div><div class="page system-page">
-    <section class="panel detail-panel"><h2>基本信息</h2><form class="edit-form" data-form="system">
-    <label>应用名称 <small>显示在浏览器标签和工作空间。</small><input name="brandName" maxlength="35" required value="${escape(brandName())}"></label>
-    ${[['logo','应用 Logo','PNG 或 JPG，200 KB 以内'],['icon','浏览器图标','PNG 或 JPG，200 KB 以内']].map(([id,label,hint])=>`<label class="system-image">${label}<small>${hint}</small><span><img src="${escape(brandImage(id))}" alt=""></span><input type="file" name="${id}" accept="image/png,image/jpeg,image/webp"></label>`).join('')}
-    <label>工作空间名称<input name="name" maxlength="35" required value="${escape(state.profile.name)}"></label>
-    <div class="row-actions">${link('预览登录与注册','login')}${button('恢复示例数据','reset')}<button class="button primary" type="submit">保存设置</button></div>
-    </form></section></div>`;
+  return `<div class="page system-page">${heading('系统设置','配置工作空间名称、应用标识和浏览器图标。')}
+    <div class="brand-layout"><section class="panel brand-editor"><h2>基本信息</h2><form class="edit-form" data-form="system">
+    <div class="host-fields"><label>应用名称<input name="brandName" maxlength="35" required value="${escape(brandName())}"></label>
+      <label>工作空间名称<input name="name" maxlength="35" required value="${escape(state.profile.name)}"></label></div>
+    <div class="brand-uploads">${[['logo','应用 Logo'],['icon','浏览器图标']].map(([id,label])=>`<label>${label}<span class="brand-image-sample"><img data-current-image="${id}" src="${escape(brandImage(id))}" alt=""></span><input type="file" name="${id}" accept="image/png,image/jpeg,image/webp"></label>`).join('')}</div>
+    <small>支持 PNG、JPG 或 WebP，每张图片最多 200 KB。</small>
+    <div class="row-actions">${button('恢复示例数据','reset')}<button class="button primary" type="submit">保存设置</button></div>
+    </form></section>
+    <aside class="panel brand-preview"><div class="view-heading"><h2>外观预览</h2></div>
+      <figure><figcaption>浏览器标签</figcaption><div class="tab-preview"><img data-brand-preview="icon" src="${escape(brandImage('icon'))}" alt=""><span data-brand-preview="brandName">工作台 · ${escape(brandName())}</span></div></figure>
+      <figure><figcaption>工作空间侧栏</figcaption><div class="sidebar-preview"><img data-brand-preview="logo" src="${escape(brandImage('logo'))}" alt=""><div>${icon('layout-dashboard')} 工作台</div><p>${icon('user-round')} <strong data-brand-preview="name">${escape(state.profile.name)}</strong></p></div></figure>
+      ${link('预览登录与注册','login','arrow-up-right')}
+    </aside></div></div>`;
 }
 function authPreview(register) {
   const en=commandLanguage==='en';
   const t=(zh,english)=>en?english:zh;
   const title=register?t('创建账号','Create an account'):t('欢迎回来','Welcome back');
+  const sheet=byId('files','case-weekly-sheet')?.sections?.find(section=>section.table)?.table;
+  const channelRows=(sheet?.rows||[]).filter(row=>row[0]!=='合计'&&typeof row[2]==='number');
+  const largest=Math.max(1,...channelRows.map(row=>row[2]));
+  const channelNames={'官网':'Website','平台旗舰店':'Flagship store','分销':'Distribution'};
   const labels=register?[[t('用户名','Username'),'linchen'],[t('昵称（选填）','Display name (optional)'),t('林晨','Lin Chen')],[t('邀请码','Invite code'),'TEAM–A1'],[t('密码','Password'),'••••••••••••••'],[t('确认密码','Confirm password'),'••••••••••••••']]:[[t('用户名','Username'),'product'],[t('密码','Password'),'••••••••••••••']];
   return `<main class="auth-preview" id="workspace"><section class="auth-story">
     <a class="auth-logo" href="#home"><img src="${escape(brandImage('logo'))}" alt="${escape(brandName())}"></a>
@@ -828,6 +890,7 @@ function authPreview(register) {
       <article class="panel auth-report"><header><strong>${icon('messages-square')}${t('经营数据周报','Weekly operations report')}</strong>${badge(t('已完成','Completed'),'success')}</header>
        <blockquote>${t('整理本周经营情况，','Summarize this week’s operations,')}<br>${t('列出需要跟进的问题。','and flag issues that need follow-up.')}</blockquote>
        <p>${t('周报与渠道明细已整理。退款问题已列入待跟进事项，可继续追问核对顺序。','The report and channel breakdown are ready. Ask a follow-up about checking refunds.')}</p>
+       ${channelRows.length?`<figure class="auth-channel-chart"><figcaption>${t('本周渠道销售额 · 万元','Weekly channel sales · CNY 10k')}</figcaption>${channelRows.map(([label,,value])=>`<div><span>${escape(en?(channelNames[label]||label):label)}</span><progress aria-hidden="true" max="${largest}" value="${Math.max(0,value)}"></progress><strong>${escape(value.toFixed(1))}</strong></div>`).join('')}</figure>`:''}
        <div>${['case-weekly-doc','case-weekly-sheet'].map(id=>byId('files',id)).filter(Boolean).map(fileButton).join('')}</div>
       </article><div class="auth-capabilities">${[['book-open','团队资料','Team knowledge'],['bot','AI 员工','AI teammates'],['clock','定时任务','Scheduled tasks']].map(([glyph,zh,eng])=>`<span>${icon(glyph)}${t(zh,eng)}</span>`).join('')}</div>
     </div></section><section class="auth-form-side">
@@ -1307,7 +1370,7 @@ async function saveSystemSettings(values) {
   for(const field of ['logo','icon']){
     const file=values[field];
     if(!file.size) continue;
-    if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>200_000) {
+    if(!validBrandAsset(file)) {
       toast('请选择 200 KB 以内的 PNG、JPG 或 WebP 图片');return;
     }
     next[field]=await readDataUrl(file);
@@ -1315,6 +1378,21 @@ async function saveSystemSettings(values) {
   state.profile=next;
   if(!save()){state.profile=previous;return;}
   render();toast('设置已保存');
+}
+function validBrandAsset(file) {
+  return ['image/png','image/jpeg','image/webp'].includes(file.type)&&file.size<=200_000;
+}
+async function previewBrandAsset(input) {
+  const file=input.files[0];
+  const accepted=!file||validBrandAsset(file);
+  input.setCustomValidity(accepted?'':'请选择 200 KB 以内的 PNG、JPG 或 WebP 图片');
+  if(!accepted)input.reportValidity();
+  let src=brandImage(input.name);
+  if(file&&accepted){
+    try {src=await readDataUrl(file);} catch {toast('读取图片失败');}
+  }
+  if(!input.isConnected||file!==input.files[0])return;
+  for(const image of document.querySelectorAll(`[data-brand-preview="${input.name}"],[data-current-image="${input.name}"]`))image.src=src;
 }
 async function upload(file, target, forChat) {
   const attachmentRoute=page+'/'+routeDetail;
@@ -1486,10 +1564,28 @@ document.addEventListener('click',async event=>{
       if(!byId('staff',id)){state.staff.push({...marketStaff.find(person=>person.id===id)});save();render();toast('已加入我的员工');}
       break;
     case 'skill-detail': skillDetail(byId('skills',id));break;
+    case 'market-preview': {
+      const skill=byId('market',id),recipe=marketRecipes[id];
+      const installed=state.skills.find(item=>item.marketId===id);
+      modal(skill.name,`<div class="detail-block"><h3>适用任务</h3><p>${escape(skill.description)}</p></div>
+        ${recipe?`<div class="detail-block"><h3>示例指令</h3><blockquote class="prompt-sample">${escape(recipe.example)}</blockquote></div>`:''}
+        <footer class="dialog-footer">${button('关闭','close')}${installed?button('在对话中使用','try-skill',{id:installed.id,primary:true}):button('安装技能','install',{id,primary:true})}</footer>`);
+      break;
+    }
     case 'try-skill':
       selectedSkill=id;activeChat=undefined;activeStaff='';draftAttachments.delete('chat/');drafts.delete('chat/');dialog.close();go('chat',{keepDraft:page!=='chat'||Boolean(routeDetail)});document.querySelector('#message')?.focus();break;
     case 'select-team': activeTeam=id;render();break;
     case 'note': activeNote=id;render();break;
+    case 'note-section': {
+      const section=document.getElementById('note-section-'+id);
+      section?.focus({preventScroll:true});section?.scrollIntoView({block:'start'});break;
+    }
+    case 'insert-preference': {
+      const field=control.form.elements.preferences;
+      const next=field.value+(field.value&&!field.value.endsWith('\n')?'\n':'')+id;
+      if(next.length>field.maxLength){toast('偏好已达到字数上限');break;}
+      field.value=next;field.focus();field.setSelectionRange(next.length,next.length);break;
+    }
     case 'note-view': noteView=id;render();break;
     case 'graph-neighborhood': graphNeighborhood=!graphNeighborhood;render({bottom:false});break;
     case 'graph-reset': graphNeighborhood=false;activeNote=state.knowledge[0]?.id;render({bottom:false});break;
@@ -1581,14 +1677,20 @@ document.addEventListener('click',async event=>{
     case 'download': download(byId('files',id));break;
     case 'install': {
       if(state.skills.some(item=>item.marketId===id))break;
-      state.skills.unshift({...byId('market',id),id:uid(),marketId:id});save();render();toast('已添加到我的技能');break;
+      const skill=byId('market',id);
+      state.skills.unshift({...skill,instructions:skill.instructions||marketRecipes[id]?.example||'',id:uid(),marketId:id});
+      save();if(dialog.open)dialog.close();render();toast('已添加到我的技能');break;
     }
     case 'run': await runTask(byId('tasks',id));break;
     case 'runs': runFilter='all';runIndex=0;go('tasks/'+id);break;
     case 'run-filter': runFilter=id;runIndex=0;render();break;
     case 'run-detail': runIndex=Number(id);render();break;
     case 'task-step': taskStep(control.closest('form'),id);break;
-    case 'refresh-model': connection=await modelStatus();render();toast(modelLabel());break;
+    case 'refresh-model':
+      connection.checking=true;render();
+      connection=await modelStatus();
+      if(page==='models'){render();toast(modelLabel());}
+      break;
     case 'reset': modal('恢复示例数据',`<p>当前浏览器中的编辑和上传会被替换为初始示例。</p><footer class="dialog-footer">${button('取消','close')}${button('确认恢复','confirm-reset',{primary:true})}</footer>`);break;
     case 'confirm-reset': drafts.clear();draftAttachments.clear();caseFilter='all';fileQuery='';homeTab='cases';state=load(true);activeChat=state.chats[0]?.id;activeNote=state.knowledge[0]?.id;if(save())await removeOfficeFile().catch(()=>{});dialog.close();render();break;
   }
@@ -1656,6 +1758,10 @@ document.addEventListener('submit',async event=>{
 });
 document.addEventListener('input',event=>{
   const target=event.target;
+  if(target.form?.dataset.form==='system'&&['brandName','name'].includes(target.name)){
+    document.querySelector(`[data-brand-preview="${target.name}"]`).textContent=target.name==='brandName'?'工作台 · '+target.value:target.value;
+  }
+  if(target.id==='note-search'&&target.value.trim())document.querySelector('.note-index').open=true;
   if(target.id==='file-search'){fileQuery=target.value;document.querySelector('#workspace-files').innerHTML=fileResults();document.querySelector('#file-count').textContent=visibleFiles().length+' 份文件';}
   if(target.id==='task-search'){taskSearch=target.value;document.querySelector('#task-rows').innerHTML=taskRows();}
   if(target.id==='space-search'){
@@ -1670,9 +1776,13 @@ document.addEventListener('input',event=>{
   if(query) document.querySelectorAll(query+' [data-search]').forEach(row=>{
     row.hidden=!row.dataset.search.toLowerCase().includes(event.target.value.trim().toLowerCase());
   });
+  if(query==='#collection-list'){
+    document.querySelector('.search-empty').hidden=!target.value.trim()||!!document.querySelector('#collection-list [data-search]:not([hidden])');
+  }
 });
 document.addEventListener('change',event=>{
   const target=event.target;
+  if(target.form?.dataset.form==='system'&&target.type==='file')void previewBrandAsset(target);
   if(target.hasAttribute('data-replay-case')){openReplay(target.value);dialog.querySelector('[data-replay-case]').focus();}
   if(target.id==='task-status'||target.id==='task-tag'){
     if(target.id==='task-status')taskStatus=target.value;

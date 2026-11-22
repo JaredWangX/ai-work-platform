@@ -7,7 +7,7 @@ let engine;
 function loadMotion() {
   engine??=new Promise(resolve=>{
     const script=document.createElement('script');
-    script.src='/vendor/gsap.min.js';
+    script.src=new URL('./vendor/gsap.min.js', import.meta.url).href;
     script.onload=()=>resolve(window.gsap);
     script.onerror=()=>resolve(null);
     document.head.append(script);
