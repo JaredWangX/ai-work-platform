@@ -18,6 +18,7 @@ const assets = {
   '/markdown.mjs':['markdown.mjs','text/javascript; charset=utf-8'],
   '/vendor/markdown-it.mjs':['vendor/markdown-it.mjs','text/javascript; charset=utf-8'],
   '/vendor/markdown-it-license.txt':['vendor/markdown-it-license.txt','text/plain; charset=utf-8'],
+  '/help.mjs':['help.mjs','text/javascript; charset=utf-8'],
   '/data.js':['data.js','text/javascript; charset=utf-8'],
   '/icons.js':['icons.js','text/javascript; charset=utf-8'],
   '/style.css':['style.css','text/css; charset=utf-8'],

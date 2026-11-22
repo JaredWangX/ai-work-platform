@@ -6,6 +6,7 @@ import {databases,workspaceAPI,workspaceToken} from './workspace-client.mjs';
 import { putOfficeFiles, getOfficeFile, removeOfficeFile, readOfficeUpload } from './office-files.mjs';
 import { refreshWorkspaceMotion, animateEditor } from './workspace-motion.mjs';
 import { groups, seed } from './data.js';
+import { helpTopics } from './help.mjs';
 import { icon } from './icons.js';
 import { examples, exampleFiles, featuredCases, fileText } from './showcase.js';
 import { readEvents } from './events.mjs';
@@ -24,7 +25,7 @@ let syncNeedsRender=false;
 const canManageConnections=()=>!account||account.role==='admin';
 
 const pageNames = Object.fromEntries(groups.flatMap(([, links]) => links.map(([key, name]) => [key, name])));
-Object.assign(pageNames,{login:'登录',register:'注册'});
+Object.assign(pageNames,{login:'登录',register:'注册',help:'帮助文档'});
 const statusNames = ['待开始','进行中','已完成'];
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => (
   {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]
@@ -205,13 +206,14 @@ function heading(title, description, actions = '') {
   return `<div class="section-head"><div class="page-identity">${glyph?`<span class="page-symbol" aria-hidden="true">${icon(glyph)}</span>`:''}<div><h1>${escape(title)}</h1><p>${escape(description)}</p></div></div>${actions}</div>`;
 }
 function nav() {
-  const sections=groups.map(([group,links]) => `<div class="nav-group" role="group" aria-label="${group}">
+  const sections=groups.map(([group,links]) => `<div class="nav-group" role="group" aria-label="${group==='工作台'?'工作空间':group}">
     <p aria-hidden="true">${group==='工作台'?'工作空间':group}</p>
     ${links.map(([key,name,glyph]) => `<a href="#${key}" class="nav-link" title="${name}" ${page===key?'aria-current="page"':''}>${icon(glyph)}<span>${name}</span></a>`).join('')}</div>`);
   return `<aside class="sidebar${mobileMenu ? ' open' : ''}" id="navigation">
     <div class="brand-row"><a class="brand" href="#home" aria-label="${escape(brandName())} 工作台"><img src="${escape(brandImage('logo'))}" width="154" height="51" alt="${escape(brandName())}"><img class="brand-mark" src="${escape(brandImage('icon'))}" width="29" height="29" alt=""></a>
       ${button('','fold-nav',{glyph:'panel-left',title:'收起主导航'})}</div>
     <nav aria-label="工作空间" class="navigation">${sections.join('')}</nav>
+    <a class="nav-link help-entry" href="#help" title="帮助文档" aria-label="帮助文档" ${page==='help'?'aria-current="page"':''}>${icon('circle-help')}<span>帮助文档</span></a>
     <a class="account" href="#settings" aria-label="个人设置"><span class="account-mark">${icon('user-round')}</span><span><strong>${escape(state.profile.name)}</strong><small>团队工作空间</small></span></a>
   </aside>`;
 }
@@ -1054,7 +1056,22 @@ function authPreview(register) {
         <p class="auth-note">${register?'':button(t('使用找回码','Recover account'),'recover-account')} <a href="#home">${t('直接试用工作台','Explore as a guest')}</a></p>
       </div></section></main>`;
 }
-const views = {home:dashboard,chat:chatView,projects,tasks,knowledge,files,database,models,settings,system:systemSettings,teams,users};
+function helpPage() {
+  const topic=helpTopics.find(item=>item.id===routeDetail) || helpTopics[0];
+  const url=item=>item===helpTopics[0]?'#help':'#help/'+item.id;
+  return `<div class="page help-page"><header class="section-head"><div class="page-identity">
+    <span class="page-symbol">${icon('circle-help')}</span><div><h1>帮助文档</h1><p>从第一份经营报表开始，按需接入门店资料和团队。</p></div></div></header>
+    <div class="help-layout"><nav class="help-index" aria-label="使用指南目录">
+      <h2>使用指南</h2>${helpTopics.map(item=>`<a href="${url(item)}" ${item===topic?'aria-current="page"':''}>${icon(item.icon)}<span>${item.label}</span></a>`).join('')}
+    </nav><label class="help-picker">选择指南<select id="help-topic">${helpTopics.map(item=>`<option value="${url(item)}"${item===topic?' selected':''}>${item.label}</option>`).join('')}</select></label>
+    <article class="help-article panel" aria-labelledby="help-title"><h2 id="help-title" tabindex="-1">${topic.title}</h2><p class="help-intro">${topic.intro}</p>
+    <ol class="help-steps">${topic.steps.map(([title,text])=>`<li><h3>${title}</h3><p>${text}</p></li>`).join('')}</ol>
+    ${topic.example?`<aside class="help-example"><div><h3>示例指令</h3>${button('复制指令','copy-help',{glyph:'copy',id:topic.id})}</div><p>${topic.example}</p></aside>`:''}
+    ${topic.tip?`<p class="help-note">${topic.tip}</p>`:''}
+    <footer class="help-actions">${topic.links.map(([key,label],index)=>link(label,key,'arrow-right',index===0)).join('')}</footer>
+    </article></div></div>`;
+}
+const views = {help:helpPage,home:dashboard,chat:chatView,projects,tasks,knowledge,files,database,models,settings,system:systemSettings,teams,users};
 function filterRows(input){
   const target=document.querySelector(input.dataset.filter);
   if(!target)return;
@@ -1103,6 +1120,7 @@ function render({keepDraft = true, bottom = true,preserveInputs=true} = {}) {
   const route=page+'/'+routeDetail;
   if (page==='chat') activeChat=routeDetail?byId('chats',routeDetail)?.id:undefined;
   const sameRoute=oldRoute===route;
+  const helpFocus=!sameRoute && page==='help' && document.activeElement?.closest('.help-index,.help-picker');
   const restoreInputs=sameRoute&&preserveInputs?restoreInputsAfterPaint():()=>{};
   if (!sameRoute && page==='chat') showConversationStart=Boolean(byId('chats',activeChat)?.example);
   if (!sameRoute && dialog.open) dialog.close();
@@ -1125,8 +1143,8 @@ function render({keepDraft = true, bottom = true,preserveInputs=true} = {}) {
       ${page==='chat'?button(commandLanguage==='zh'?'中文':'EN','command-language',{extra:'aria-label="切换指令示例语言"'}):'<span class="workspace-language">中文</span>'}</div></header>
     <main id="workspace" tabindex="-1" class="workspace">${view()}</main></div>`;
   restoreInputs();
-  if(!sameRoute)document.querySelector('#workspace').classList.add('workspace-enter');
   document.querySelector('.navigation').scrollTop = navScroll;
+  if(helpFocus)document.querySelector('#help-title')?.focus({preventScroll:true});
   if (sameRoute) document.querySelector('#workspace').scrollTop = scrollTop;
   const nextInput=document.querySelector('#message,#home-input');
   if (nextInput) {
@@ -1727,6 +1745,11 @@ document.addEventListener('click',async event=>{
       const chat=byId('chats',id);
       chat.archived=!chat.archived;save();render({bottom:false});toast(chat.archived?'会话已归档':'会话已恢复');break;
     }
+    case 'copy-help': {
+      const example=helpTopics.find(topic=>topic.id===id)?.example;
+      if(example)try{await navigator.clipboard.writeText(example);toast('已复制指令');}catch{toast('请选中示例文字并复制');}
+      break;
+    }
     case 'copy-message': {
       const message=byId('chats',activeChat)?.messages[Number(id)];
       if(message)try{await navigator.clipboard.writeText(message.text);toast('已复制消息');}catch{toast('复制失败，请手动选择文字');}
@@ -2155,6 +2178,7 @@ document.addEventListener('change',event=>{
     if(['','3306','5432'].includes(port.value))port.value=target.value==='MySQL'?'3306':'5432';
   }
   if(target.dataset.project){byId('projects',target.dataset.project).status=target.value;save();render();}
+  if(target.id==='help-topic')location.hash=target.value;
   if(target.id==='file-type'){fileType=target.value;render({bottom:false});document.querySelector('#file-type')?.focus({preventScroll:true});}
   if((target.dataset.upload||target.id==='file-upload')&&target.files[0])void upload(target.files[0],target.dataset.upload,activeChat).catch(()=>toast('文件读取失败，请重试。'));
 });

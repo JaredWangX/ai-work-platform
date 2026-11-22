@@ -25,34 +25,28 @@ export async function refreshWorkspaceMotion({route,homeTab,caseFilter,libraryLa
   const stateKey=area==='library'?[caseFilter,libraryLayout,fileType].join('/') :
     area==='project-overview'?overviewStage:area==='task-types'?scheduleDay:area==='cases'?homeTab:'';
   const key=route+'/'+area+'/'+stateKey;
-  const old=lastView;
+  const previous=lastView;
+  lastView=key;
   const tick=++sequence;
   context?.revert();
   context=undefined;
-  if(!host||preference.matches){lastView='';return;}
-  if(old===key)return;
+  // A route paints in its final position. Feedback belongs to explicit filter changes.
+  if(!host || preference.matches || previous===key || !previous.startsWith(route+'/'+area+'/')) return;
   const gsap=await loadMotion();
   if (!gsap || preference.matches || tick!==sequence || !host.isConnected) return;
-  lastView=key;
-  const entering=!old.startsWith(route+'/'+area+'/');
   context=gsap.context(()=>{
     const reveal=(selector,vars={})=>{
       const items=[...host.querySelectorAll(selector)].slice(0,10);
       if (items.length) gsap.from(items,{y:7,opacity:.26,duration:.26,stagger:.024,ease:'power2.out',clearProps:'transform,opacity',...vars});
     };
-    if (entering && (area==='library'||area==='cases')) {
-      reveal('.dossier-card',{y:10});
-      reveal('.folio-face',{y:11,rotation:3,opacity:.9,delay:.07,duration:.38,stagger:.065});
-    }
+    if(area==='cases') reveal('.dossier-card',{y:0,duration:.18});
     if(area==='library') reveal('.library-row,.file-tile',{duration:.18,stagger:.014});
     if(area==='project-files') reveal('.file-tile');
     if(area==='project-activity') reveal('.activity-feed article');
     if(area==='project-overview') {
-      if(entering) reveal('.pulse-plot .filled',{y:0,scaleY:.15,transformOrigin:'bottom',duration:.35});
       reveal('.stage-items button',{x:4,y:0});
     }
     if(area==='task-types') {
-      if(entering) reveal('.week-strip button');
       reveal('.day-agenda button',{y:4});
     }
   },host);

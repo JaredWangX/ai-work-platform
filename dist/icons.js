@@ -1,5 +1,6 @@
 // Icon paths from Lucide (ISC). See lucide-license.txt.
 const paths = {
+  "circle-help": "<circle cx='12' cy='12' r='10'/><path d='M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.6-3 4'/><path d='M12 17h.01'/>",
   "list": "<path d='M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01'/>",
   "chevron-down": "<path d='m6 9 6 6 6-6'/>",
   "arrow-left": "<path d='m12 19-7-7 7-7M19 12H5'/>",
