@@ -771,3 +771,17 @@ dialog .dialog-header { flex:none;min-width:0; }
   .dialog-header { padding-block:7px; }
   .edit-form,.dialog-body { scroll-padding-block:6px; }
 }
+
+/* Keep the same four resource entry points visible in both composers. */
+.home-compose .compose-footer,.composer.panel .compose-footer { display:flex;flex-wrap:wrap;align-items:center; }
+.home-compose .composer-tools,.composer.panel .composer-tools { display:flex;flex-wrap:wrap;align-items:center;gap:3px; }
+.home-compose .composer-tools .button,.composer.panel .composer-tools .button { min-height:36px;white-space:nowrap; }
+.home-compose .composer-actions,.composer.panel .composer-actions { margin-inline-start:auto; }
+@media(max-width:720px) {
+  :is(.home-compose,.composer.panel) .composer-tools { gap:2px; }
+  :is(.home-compose,.composer.panel) .composer-tools .button { padding-inline:7px; }
+}
+
+.message-references { display:flex;justify-content:flex-end;flex-wrap:wrap;gap:4px 8px;list-style:none;margin:6px 0 0;padding:0; }
+.message-references li { display:inline-flex;align-items:center;gap:4px;max-width:100%;font-size:12px;color:var(--secondary);overflow-wrap:anywhere; }
+.message-references svg { width:14px;height:14px;flex:none;color:var(--link); }

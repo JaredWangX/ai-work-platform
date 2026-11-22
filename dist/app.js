@@ -109,6 +109,7 @@ let modelConnections=[];
 let connectionCatalogError='';
 let connection = {available:false,checking:true};
 let activeChat;
+let lastComposerRoute='';
 let activeNote = state.knowledge[0]?.id;
 let noteView = 'read';
 let graphNeighborhood = false;
@@ -133,13 +134,17 @@ let scheduleDay=beijingWeekday();
 let fileType = 'all';
 let loading = new Set();
 const liveReplies = new Map();
-let selectedSkill = '';
-let selectedNote = '';
-let selectedDatabase = '';
+const draftResources=new Map();
+function resourcesForDraft(route=page+'/'+routeDetail) {
+  if(!draftResources.has(route))draftResources.set(route,{});
+  return draftResources.get(route);
+}
 let picker = '';
 let pickerOrigin = '';
 let pickerCaret = 0;
 const draftAttachments=new Map();
+const attachmentLimit=6;
+const attachmentLimitMessage='每条消息最多引用 '+attachmentLimit+' 份文件。请移除多余附件，或分两次发送。';
 function filesForDraft(route=page+'/'+routeDetail) {
   if (!draftAttachments.has(route)) draftAttachments.set(route,[]);
   return draftAttachments.get(route);
@@ -159,7 +164,6 @@ let taskTag='all';
 let runFilter='all';
 let runIndex=0;
 let overviewStage='进行中';
-let activeStaff='';
 let activeTeam='';
 let staffTab='own';
 
@@ -268,7 +272,7 @@ function dashboard() {
           <label class="sr-only" for="home-input">输入你的需求</label>
           <textarea id="home-input" name="prompt" required maxlength="4000" placeholder="把需要完成的工作告诉 AI 工作平台…"></textarea>
           ${resourceChips()}
-          <div class="compose-footer"><div class="composer-tools">${uploadControl('添加资料')}${button('选择技能','resource-picker',{id:'skills',glyph:'wand-sparkles',extra:`aria-expanded="${Boolean(picker)}" ${picker?'aria-controls="resource-menu"':''}`})}</div><button class="button primary" type="submit">${icon('arrow-up')}开始对话</button></div>
+          <div class="compose-footer"><div class="composer-tools">${resourceButtons()}</div><div class="composer-actions">${uploadControl('添加资料')}<button class="button primary" type="submit">${icon('arrow-up')}开始对话</button></div></div>
           ${picker ? resourceMenu() : ''}
         </form>
       </section>
@@ -281,7 +285,7 @@ function dashboard() {
 
     </div><aside class="home-side">
       <section class="panel side-card"><div class="side-title"><h2>定时任务</h2>${link('全部 '+state.tasks.length+' 项','tasks')}</div>
-        ${tasks.map(item => `<div class="side-row"><small>${escape(item.time)} · 北京时间</small><strong>${escape(item.name)}</strong><div class="side-row-footer">${badge(item.runs[0] ? (item.runs[0].status==='failed'?'执行失败':'执行成功') : (item.enabled?'等待执行':'已下线'),item.runs[0]?.status==='failed'?'danger':item.runs.length?'success':'')}${button('查看记录','runs',{id:item.id})}</div></div>`).join('') || empty('暂无定时任务')}
+        ${tasks.map(item => `<div class="side-row"><small>${escape(item.time)} · 北京时间 · ${scheduleLabels[scheduleState(item)]}</small><strong>${escape(item.name)}</strong><div class="side-row-footer">${taskRunBadge(item.runs[0])}${button('查看记录','runs',{id:item.id})}</div></div>`).join('') || empty('暂无定时任务')}
       </section>
       <section class="panel side-card"><div class="side-title"><h2>进行中的项目</h2>${icon('kanban')}</div><div class="project-snippet"><strong>新品发布协作</strong><p>发布方案、渠道素材与客户反馈</p></div>
         <div class="stats project-stats">${statusNames.map(status => `<div><strong>${state.projects.filter(item => item.status === status).length}</strong><small>${status}</small></div>`).join('')}</div>${link('打开任务看板 →','projects')}</section>
@@ -434,28 +438,45 @@ function dismissPicker(restoreFocus=false) {
   }
 }
 const resourceMention=/(?<![a-z0-9_@.+-])@[^\s@]*$/i;
-const resourceLabels={models:'模型',skills:'技能',knowledge:'知识库',database:'数据库'};
+const resourceTypes={
+  models:{label:'模型',icon:'boxes'},skills:{label:'技能',icon:'wand-sparkles'},
+  knowledge:{label:'知识库',icon:'book-open'},database:{label:'数据库',icon:'database'},
+};
+function resourceButtons(){
+  return Object.entries(resourceTypes).map(([id,{label,icon:glyph}])=>{
+    const open=Boolean(picker) && pickerOrigin===id;
+    return `<button type="button" class="button" data-action="resource-picker" data-id="${id}" aria-expanded="${open}" ${open?'aria-controls="resource-menu"':''}>${icon(glyph)}${label}${icon('chevron-down')}</button>`;
+  }).join('');
+}
 function resourceMenu() {
   const active=modelConnections.find(item=>item.active);
   const modelList=[{id:'platform',name:'平台模型',description:active?'切换为工作空间默认':'当前默认'},...modelConnections.map(item=>({...item,description:item.model+(item.active?' · 当前默认':'')}))];
-  const list=picker==='models'?(canManageConnections()?modelList:modelList.filter(item=>item.id===(active?.id||'platform'))):state[picker];
-  const selection={models:active?.id||'platform',skills:selectedSkill,knowledge:selectedNote,database:selectedDatabase}[picker];
+  const list=picker==='models'?(canManageConnections()?modelList:modelList.filter(item=>item.id===(active?.id||'platform'))):picker==='database'?state.database.filter(item=>item.source):state[picker];
+  const selection=picker==='models'?active?.id||'platform':resourcesForDraft()[picker];
   return `<section class="resource-picker" id="resource-menu" popover="manual" aria-label="选择对话资源"><header>
-    <div class="segments" role="group" aria-label="资源类型">${Object.entries(resourceLabels).map(([key,label])=>button(label,'resource-tab',{id:key,extra:`aria-pressed="${key===picker}"`})).join('')}</div>
+    <div class="segments" role="group" aria-label="资源类型">${Object.entries(resourceTypes).map(([key,{label}])=>button(label,'resource-tab',{id:key,extra:`aria-pressed="${key===picker}"`})).join('')}</div>
     ${button('','resource-close',{glyph:'x',title:'关闭资源选择'})}
     </header>
-    <input type="search" placeholder="搜索${resourceLabels[picker]}" aria-label="搜索${resourceLabels[picker]}" data-filter="#resource-list">
-    <div id="resource-list">${list.map(item=>`<button class="resource-option" type="button" data-action="resource-pick" data-id="${escape(item.id)}" aria-pressed="${item.id===selection}" data-search="${escape(item.name+' '+(item.description||''))}"><strong>${escape(item.name)}</strong><small>${escape(item.description || '')}</small>${item.id===selection?icon('check'):''}</button>`).join('') || empty(picker==='models'?modelLabel():'暂无资源')}</div>
-    <p class="picker-empty" role="status" hidden>没有匹配的${resourceLabels[picker]}，请换个关键词。</p>
+    <input type="search" placeholder="搜索${resourceTypes[picker].label}" aria-label="搜索${resourceTypes[picker].label}" data-filter="#resource-list">
+    <div id="resource-list">${list.map(item=>`<button class="resource-option" type="button" data-action="resource-pick" data-id="${escape(item.id)}" aria-pressed="${item.id===selection}" data-search="${escape(item.name+' '+(item.description||''))}"><strong>${escape(item.name)}</strong><small>${escape(item.description || '')}</small>${item.id===selection?icon('check'):''}</button>`).join('') || empty(picker==='models'?modelLabel():picker==='database'?'暂无可查询的数据源':'暂无'+resourceTypes[picker].label)}</div>
+    <p class="picker-empty" role="status" hidden>没有匹配的${resourceTypes[picker].label}，请换个关键词。</p>
     ${picker==='models' && canManageConnections() && modelList.length>1?'<p class="picker-note">选择模型会更新当前工作空间的默认模型。</p>':''}
     ${picker==='database'?'<p class="picker-note">选择数据源后，助手会执行只读查询，并把查询结果发送给当前模型。</p>':''}
   </section>`;
 }
 function resourceChips() {
-  const resources=[['skills',selectedSkill],['knowledge',selectedNote],['database',selectedDatabase]];
+  const resources=resourcesForDraft();
   const chip=(name,action,id)=>`<button type="button" class="button" data-action="${action}" data-id="${escape(id)}" title="${escape(name)}" aria-label="移除 ${escape(name)}">${icon('x')}<span>${escape(name)}</span></button>`;
-  return `<div class="resource-chips">${resources.map(([key,id])=>byId(key,id)?chip(byId(key,id).name,'remove-resource',key):'').join('')}
+  return `<div class="resource-chips">${['skills','knowledge','database'].map(key=>byId(key,resources[key])?chip(byId(key,resources[key]).name,'remove-resource',key):'').join('')}
     ${filesForDraft().map(id=>byId('files',id)).filter(Boolean).map(file=>chip(file.name,'remove-attachment',file.id)).join('')}</div>`;
+}
+function messageReferences(message){
+  const references=(message.resources||[]).filter(item=>['skill','knowledge','database'].includes(item.kind));
+  if(!references.length)return '';
+  return `<ul class="message-references" aria-label="本条消息引用的资源">${references.map(item=>{
+    const type=resourceTypes[item.kind==='skill'?'skills':item.kind];
+    return `<li>${icon(type.icon)}<span>${type.label} · ${escape(item.name)}</span></li>`;
+  }).join('')}</ul>`;
 }
 function attachedFiles(chat) {
   const ids=[...(chat?.attachments||[]),...(chat?.messages||[]).flatMap(message=>message.attachments||[])];
@@ -493,7 +514,7 @@ function spaceResults(chat) {
   }
   if (spaceGrouping==='folders' && groups.length) {
     const all=groups.splice(0).flatMap(group=>group.files);
-    const folders=Object.groupBy(all,file=>file.type==='表格'?'数据表':file.type==='文档'?'文档':'其他文件');
+    const folders=Object.groupBy(all,fileCategory);
     for (const [label,files] of Object.entries(folders)) groups.push({label,files});
   }
   if (spaceSort==='newest') groups.sort((a,b)=>new Date(b.updated||0)-new Date(a.updated||0));
@@ -518,10 +539,10 @@ function spaceView(chat) {
       <div class="space-filters">${spaceFilter('type',spaceTypes,spaceType,'filter','文件类型')}
         ${spaceFilter('sort',[['newest','最新优先','sort'],['name','按名称排序','list']],spaceSort,'sort','排序方式')}</div>
       <div class="space-modes"><div class="segments space-source" role="group" aria-label="文件来源">${[['artifact','产物 '+artifacts,'boxes'],['attached','关联文件 '+related,'paperclip']].map(([id,label,glyph])=>button(label,'space-source',{id,glyph,extra:`aria-pressed="${spaceSource===id}"`})).join('')}</div>
-      <div class="segments space-grouping">${[['turns','按轮次','list'],['folders','按文件夹','folder']].map(([id,label,glyph])=>button(label,'space-grouping',{id,glyph,extra:`aria-pressed="${spaceGrouping===id}"`})).join('')}</div>
+      <div class="segments space-grouping">${[['turns','按轮次','list'],['folders','按类型','folder']].map(([id,label,glyph])=>button(label,'space-grouping',{id,glyph,extra:`aria-pressed="${spaceGrouping===id}"`})).join('')}</div>
       ${button('', 'space-grid',{glyph:spaceGrid?'list':'grid',title:spaceGrid?'切换列表视图':'切换网格视图',extra:`aria-pressed="${spaceGrid}"`})}</div>
     </div><div id="space-results" class="space-results${spaceGrid?' grid-view':''}">${spaceResults(chat)}</div>
-    <footer><a class="button" href="#files">${icon('folder')} 打开完整工作空间 ${icon('arrow-right')}</a></footer></aside>`;
+    <footer><a class="button" href="#files">${icon('folder')} 前往文件管理 ${icon('arrow-right')}</a></footer></aside>`;
 }
 function themeControl(compact=false) {
   const dark=state.profile.theme==='dark';
@@ -535,7 +556,7 @@ function themeControl(compact=false) {
 }
 function conversationHistory() {
   const archived=state.chats.filter(item=>item.archived);
-  const visible=state.chats.filter(item=>Boolean(item.archived)===archivedChats);
+  const visible=state.chats.filter(item=>Boolean(item.archived)===archivedChats).toSorted((a,b)=>new Date(b.updated)-new Date(a.updated));
   return `<aside class="chat-history" id="chat-history"><header class="drawer-head"><h2>会话历史 <small>${state.chats.length}</small></h2><div>
     ${button('','new-chat',{title:'新对话',glyph:'plus'})}${button('','history',{title:'关闭会话历史',glyph:'arrow-left'})}</div></header>
     <label class="history-filter search-field">${icon('search')}<input id="chat-search" aria-label="搜索会话" type="search" placeholder="搜索会话" data-filter="#chat-list"></label>
@@ -544,9 +565,9 @@ function conversationHistory() {
       <button type="button" data-action="open-chat" data-id="${item.id}" aria-pressed="${item.id===activeChat}"><span><strong>${escape(item.title)}</strong><small>${beijingTime(item.updated,true,true)}</small></span></button>
       <div class="history-actions">${button('','archive-chat',{glyph:archivedChats?'refresh-cw':'archive',id:item.id,title:archivedChats?'恢复会话':'归档会话'})}
       ${button('','delete',{glyph:'trash',id:item.id,title:'删除会话',extra:'data-collection="chats"'})}</div></div>`).join('')||empty(archivedChats?'暂无归档会话':'暂无会话')}
-      ${visible.length?'<p class="history-end">没有更多了</p>':''}</div>
+      ${visible.length?'<p class="history-end" role="status">没有更多了</p>':''}</div>
     <footer>${button('已归档 '+archived.length,'toggle-archived',{glyph:'archive',extra:`aria-pressed="${archivedChats}"`})}
-      <a class="button" href="#files">工作空间 ${icon('chevron-right')}</a></footer></aside>`;
+      <a class="button" href="#files">文件管理 ${icon('chevron-right')}</a></footer></aside>`;
 }
 const promptGroups = {
   office:['制作一份 AI 发展趋势的演示文稿大纲','生成一份新能源汽车市场调研报告','写一份低空经济行业的研究报告，包含市场规模与竞争格局','做一份项目排期表模板，列出负责人和交付物','拟定一项定时任务：工作日早上 9 点汇总昨日数据','整理会议记录并列出后续行动','按渠道整理本周经营情况','根据数据对比月度销售表现','生成一份客户反馈摘要'],
@@ -592,7 +613,7 @@ function executionView(message) {
 }
 function chatView() {
   const chat=byId('chats',activeChat);
-  const person=byId('staff',chat?.staff || activeStaff);
+  const person=byId('staff',chat?.staff || resourcesForDraft().staff);
   const busy=loading.has(activeChat);
   const messages=chat?.messages||[];
   const live=liveReplies.get(activeChat);
@@ -607,7 +628,7 @@ function chatView() {
         const attached=(message.attachments||[]).map(id=>byId('files',id)).filter(Boolean);
         const files=(message.files||[]).map(id=>byId('files',id)).filter(Boolean);
         return message.role==='user'
-          ? `<div class="user-message"><time>${beijingTime(message.at,true,true)}</time><p>${escape(message.text)}</p>${attached.length?`<div class="message-attachments">${attached.map(fileButton).join('')}</div>`:''}${button('','copy-message',{id:String(index),glyph:'copy',title:'复制消息'})}</div>`
+          ? `<div class="user-message"><time>${beijingTime(message.at,true,true)}</time><p>${escape(message.text)}</p>${messageReferences(message)}${attached.length?`<div class="message-attachments">${attached.map(fileButton).join('')}</div>`:''}${button('','copy-message',{id:String(index),glyph:'copy',title:'复制消息'})}</div>`
           : `<div class="reply"><span class="tile-icon reply-avatar">${icon('bot')}</span><div class="reply-main"><div class="reply-meta">${message.at?`<time>${beijingTime(message.at,true,true)}</time>` : ''} ${badge(message.mode==='live'?(message.failed?'发送失败':message.model||'模型回复'):'案例回放')}</div>
             ${executionView(message)}
             ${answerBody(message)}
@@ -626,7 +647,7 @@ function chatView() {
        <textarea id="message" name="prompt" placeholder="输入你的需求，或 @ 选择技能、知识库、数据库…" maxlength="4000" required ${busy?'disabled':''}></textarea>
        ${resourceChips()}
        <div class="compose-footer"><div class="composer-tools">
-       ${[['models','模型','boxes'],['skills','技能','wand-sparkles'],['database','数据库','database']].map(([id,label,glyph])=>`<button type="button" class="button" data-action="resource-picker" data-id="${id}" aria-expanded="${!!picker && pickerOrigin===id}" ${picker && pickerOrigin===id?'aria-controls="resource-menu"':''}>${icon(glyph)}${label}${icon('chevron-down')}</button>`).join('')}
+       ${resourceButtons()}
        </div><div class="composer-actions">${uploadControl('附件','attachment',true)}${button('','composer-settings',{glyph:'settings',title:'对话设置'})}<button type="submit" class="button primary icon-button send-button" aria-label="发送" title="发送" ${busy?'disabled':''}>${icon('send')}</button></div></div>
        ${picker ? resourceMenu() : ''}
       </form>
@@ -672,10 +693,14 @@ function projectDetail(item) {
     <label>任务说明<textarea name="description" rows="3" maxlength="2000">${escape(item.description||'')}</textarea></label>
     ${file?`<div class="detail-block"><h3>相关文件</h3>${fileButton(file)}</div>`:''}
     <div class="detail-block"><h3>讨论记录</h3>${(item.comments||[]).map(comment=>`<article class="project-comment"><strong>${escape(comment.author)}</strong><p class="preserve-lines">${escape(comment.text)}</p></article>`).join('') || '<p>暂无讨论</p>'}</div>
-    <label>补充说明<textarea name="comment" rows="2" maxlength="800" placeholder="补充说明或提及同事…"></textarea></label>
+    <label>补充说明<textarea name="comment" rows="2" maxlength="800" placeholder="记录进展、问题或下一步分工…"></textarea></label>
     <div class="dialog-footer">${button('更多设置','edit',{id:item.id,extra:'data-collection="projects"'})}${button('取消','close')}<button class="button primary" type="submit">保存修改</button></div>
   </form>`);
 }
+function scheduleState(task){
+  return !task.scheduled?'sample':task.enabled?'enabled':'paused';
+}
+const scheduleLabels={sample:'本地示例',enabled:'后台已启用',paused:'后台已暂停'};
 function taskRunBadge(run) {
   if(run?.status==='running')return badge('正在执行');
   return run ? badge(run.status==='failed'?'执行失败':'执行成功',run.status==='failed'?'danger':'success') : badge('尚未执行');
@@ -685,57 +710,61 @@ function tasks() {
   if (task) return taskHistory(task);
   const tags=[...new Set(state.tasks.map(item=>item.tag).filter(Boolean))];
   const filters=`<div class="task-filters"><label class="search-field">${icon('search')}<input type="search" id="task-search" aria-label="搜索任务" placeholder="搜索任务名称…" value="${escape(taskSearch)}"></label>
-    <select id="task-status" aria-label="任务状态"><option value="all">全部状态</option>${[['enabled','已上线'],['disabled','已下线'],['failed','执行失败']].map(([id,label])=>`<option value="${id}"${selected(id,taskStatus)}>${label}</option>`).join('')}</select>
+    <select id="task-status" aria-label="任务状态"><option value="all">全部状态</option>${[...Object.entries(scheduleLabels),['failed','最近执行失败']].map(([id,label])=>`<option value="${id}"${selected(id,taskStatus)}>${label}</option>`).join('')}</select>
     <select id="task-tag" aria-label="任务类型"><option value="all">全部类型</option>${tags.map(tag=>`<option${selected(tag,taskTag)}>${escape(tag)}</option>`).join('')}</select>
     ${button('新建任务','edit',{primary:true,glyph:'plus',extra:'data-collection="tasks"'})}</div>`;
   const taskView=routeDetail==='types'?'types':'list';
   const tabs=`<div class="page-tabs" role="group" aria-label="任务视图">${[['list','任务列表 '+state.tasks.length],['types','任务类型 '+tags.length]].map(([id,label])=>button(label,'task-view',{id,extra:`aria-pressed="${taskView===id}"`})).join('')}</div>`;
   if(taskView==='types') return `<div class="page tasks-page">${heading('自动化任务','按北京时间安排经营简报、内容整理与数据核对，打开执行记录可查看结果和失败原因。')}${tabs}${taskSchedule(tags)}</div>`;
   return `<div class="page tasks-page">${heading('自动化任务','按北京时间安排经营简报、内容整理与数据核对，打开执行记录可查看结果和失败原因。')}${tabs}
-    <div class="metrics panel task-metrics">${[['全部任务',state.tasks.length],['执行中',state.tasks.filter(item=>loading.has(item.id)).length],['已下线',state.tasks.filter(item=>!item.enabled).length],['最近成功',state.tasks.filter(item=>item.runs[0]?.status==='success').length],['最近失败',state.tasks.filter(item=>item.runs[0]?.status==='failed').length]].map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join('')}</div>
+    <div class="metrics panel task-metrics">${[['全部任务',state.tasks.length],['执行中',state.tasks.filter(item=>loading.has(item.id)||item.runs.some(run=>run.status==='running')).length],['后台已暂停',state.tasks.filter(item=>scheduleState(item)==='paused').length],['最近成功',state.tasks.filter(item=>item.runs[0]?.status==='success').length],['最近失败',state.tasks.filter(item=>item.runs[0]?.status==='failed').length]].map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join('')}</div>
     ${filters}<div class="panel table"><table class="responsive-table"><thead><tr><th scope="col">任务 / 类型</th><th scope="col">触发规则</th><th scope="col">调度</th><th scope="col">最近执行</th><th scope="col">操作</th></tr></thead><tbody id="task-rows">${taskRows()}</tbody></table></div>
     <p class="footnote">共 ${state.tasks.length} 项任务 · 北京时间（UTC+8） · 保存并启用任务后，服务器会按计划执行</p></div>`;
 }
 function taskSchedule(tags) {
   const week=['一','二','三','四','五','六','日'];
-  const scheduled=(task,day)=>task.enabled && (task.frequency==='每天'||(task.frequency==='每个工作日' && day<5)||(task.frequency==='每周一' && day===0));
-  const counts=week.map((_,day)=>state.tasks.filter(task=>scheduled(task,day)).length);
-  const dayTasks=state.tasks.filter(task=>scheduled(task,scheduleDay)).sort((a,b)=>String(a.time).localeCompare(String(b.time)));
+  const onDay=(task,day)=>(task.frequency==='每天'||(task.frequency==='每个工作日' && day<5)||(task.frequency==='每周一' && day===0));
+  const enabled=state.tasks.filter(task=>scheduleState(task)==='enabled');
+  const samples=state.tasks.filter(task=>scheduleState(task)==='sample' && task.enabled && onDay(task,scheduleDay));
+  const counts=week.map((_,day)=>enabled.filter(task=>onDay(task,day)).length);
+  const dayTasks=enabled.filter(task=>onDay(task,scheduleDay)).sort((a,b)=>String(a.time).localeCompare(String(b.time)));
   return `<section data-display="task-types" class="schedule-view"><div class="panel schedule-board"><div class="view-heading"><h2>一周调度</h2><span>北京时间</span></div>
     <div class="week-strip" role="group" aria-label="查看某天的计划">${week.map((label,i)=>`<button type="button" data-action="schedule-day" data-id="${i}" aria-pressed="${scheduleDay===i}" aria-label="周${label}，${counts[i]} 项计划"><span>周${label}</span><strong>${counts[i]}</strong><span class="day-ticks" aria-hidden="true">${Array.from({length:Math.min(counts[i],6)},()=>'<i></i>').join('')}</span></button>`).join('')}</div>
-    <div class="day-agenda"><h3>周${week[scheduleDay]}的计划${scheduleDay===beijingWeekday()?' · 今天':''}</h3>${dayTasks.map(task=>`<button type="button" data-action="runs" data-id="${escape(task.id)}"><time>${escape(task.time)}</time><span>${escape(task.name)}</span>${icon('chevron-right')}</button>`).join('')||empty('这一天没有启用的计划。')}</div></div>
+    <div class="day-agenda"><h3>周${week[scheduleDay]}的计划${scheduleDay===beijingWeekday()?' · 今天':''}</h3>${dayTasks.map(task=>`<button type="button" data-action="runs" data-id="${escape(task.id)}"><time>${escape(task.time)}</time><span>${escape(task.name)}</span>${icon('chevron-right')}</button>`).join('')||empty('这一天没有后台计划。')}</div>
+    ${samples.length?`<div class="day-agenda"><h3>本地排期示例</h3><p>打开示例核对时间，保存并启用后才会自动执行。</p>${samples.map(task=>button(task.time+' · '+task.name,'edit',{id:task.id,glyph:'clock',extra:'data-collection="tasks"'})).join('')}</div>`:''}</div>
     <div class="schedule-types"><div class="view-heading"><h2>任务分类</h2><span>${tags.length} 类</span></div><div class="type-grid">${tags.map(tag=>{
       const items=state.tasks.filter(item=>item.tag===tag);
-      return `<button type="button" class="panel type-card" title="${escape(tag)}" data-action="task-by-type" data-id="${escape(tag)}"><span class="type-symbol">${icon(({'经营分析':'chart-no-axes-combined','内容运营':'file-text','数据处理':'database'})[tag]||'folder')}</span><span><strong>${escape(tag)}</strong><small>${items.length} 项任务 · ${items.filter(t=>t.enabled).length} 项已启用</small></span>${icon('chevron-right')}</button>`;}).join('')||empty('暂无分类')}</div></div></section>`;
+      return `<button type="button" class="panel type-card" title="${escape(tag)}" data-action="task-by-type" data-id="${escape(tag)}"><span class="type-symbol">${icon(({'经营分析':'chart-no-axes-combined','内容运营':'file-text','数据处理':'database'})[tag]||'folder')}</span><span><strong>${escape(tag)}</strong><small>${items.length} 项任务 · ${items.filter(t=>scheduleState(t)==='enabled').length} 项后台已启用</small></span>${icon('chevron-right')}</button>`;}).join('')||empty('暂无分类')}</div></div></section>`;
 }
 function taskRows() {
   const visible=state.tasks.filter(item=>item.name.toLowerCase().includes(taskSearch.trim().toLowerCase()) &&
     (taskTag==='all'||item.tag===taskTag) &&
-    (taskStatus==='all'||(taskStatus==='enabled'&&item.enabled)||(taskStatus==='disabled'&&!item.enabled)||(taskStatus==='failed'&&item.runs[0]?.status==='failed')));
+    (taskStatus==='all'||taskStatus===scheduleState(item)||(taskStatus==='failed'&&item.runs[0]?.status==='failed')));
   return visible.map(item=>`<tr><td data-label="任务"><div class="task-identity"><span class="tile-icon">${icon('bot')}</span><div><strong>${escape(item.name)}</strong><small title="${escape(byId('staff',item.assignee)?.name||'未指定执行助手')}">${escape(byId('staff',item.assignee)?.name||'未指定执行助手')} ${item.tag?badge(item.tag):''}</small></div></div></td>
     <td data-label="触发规则">${escape(item.frequency)} ${escape(item.time)}<small>北京时间 · UTC+8</small></td>
-    <td data-label="调度"><span class="task-schedule${item.enabled?' is-enabled':''}">${item.scheduled?(item.enabled?'后台已启用':'后台已暂停'):'本地示例'}</span></td>
+    <td data-label="调度"><span class="task-schedule${scheduleState(item)==='enabled'?' is-enabled':''}">${scheduleLabels[scheduleState(item)]}</span></td>
     <td data-label="最近执行">${taskRunBadge(item.runs[0])}<small>${escape(item.runs[0]?.at || '—')}</small></td>
     <td data-label="操作"><div class="row-actions">${button(loading.has(item.id)?'执行中':'执行','run',{glyph:'play',id:item.id,disabled:loading.has(item.id)})}${button('记录','runs',{id:item.id})}${button('编辑','edit',{id:item.id,extra:'data-collection="tasks"'})}</div></td></tr>`).join('') || '<tr><td colspan="5"><p class="empty">没有匹配的任务。</p></td></tr>';
 }
 function taskHistory(task) {
   const executions=task.runs;
-  const average=executions.length ? Math.round(executions.reduce((total,item)=>total+(item.seconds||0),0)/executions.length) : 0;
+  const finished=executions.filter(run=>run.status==='success'||run.status==='failed');
+  const average=finished.length?Math.round(finished.reduce((total,item)=>total+(item.seconds||0),0)/finished.length):null;
   const successes=executions.filter(item=>item.status==='success').length;
   const visible=executions.map((run,index)=>({run,index})).filter(({run})=>runFilter==='all' || run.status===runFilter);
   const current=visible.find(item=>item.index===runIndex)||visible[0];
   return `<div class="page task-history-page"><a href="#tasks" class="back-link">返回任务列表</a>
     ${heading(task.name,(byId('staff',task.assignee)?.name||'定时任务')+' · '+task.frequency+' '+task.time+' · 北京时间',button(loading.has(task.id)?'执行中':'执行任务','run',{id:task.id,glyph:'play',primary:true,disabled:loading.has(task.id)}))}
-    <div class="metrics panel history-metrics">${[['执行次数',executions.length],['成功率',executions.length?Math.round(successes/executions.length*100)+'%':'—'],['平均耗时',average ? average+' 秒':'—'],['最近执行',executions[0]?.at || '—']].map(([label,value])=>`<div><span>${label}</span><strong>${escape(value)}</strong></div>`).join('')}</div>
+    <div class="metrics panel history-metrics">${[['执行次数',executions.length],['成功率',finished.length?Math.round(successes/finished.length*100)+'%':'—'],['平均耗时',average!==null?average+' 秒':'—'],['最近执行',executions[0]?.at || '—']].map(([label,value])=>`<div><span>${label}</span><strong>${escape(value)}</strong></div>`).join('')}</div>
     <div class="panel task-history"><aside>
-      <div class="segments" role="group" aria-label="按结果筛选">${[['all','全部'],['success','成功'],['failed','失败']].map(([id,label])=>button(label,'run-filter',{id,extra:`aria-pressed="${runFilter===id}"`})).join('')}</div>
+      <div class="segments" role="group" aria-label="按结果筛选">${[['all','全部'],['running','执行中'],['success','成功'],['failed','失败']].map(([id,label])=>button(label,'run-filter',{id,extra:`aria-pressed="${runFilter===id}"`})).join('')}</div>
       ${visible.map(({run,index})=>`<button class="execution-item" type="button" data-action="run-detail" data-id="${index}" aria-pressed="${current.index===index}">
         <strong>第 ${executions.length-index} 次执行</strong>${taskRunBadge(run)}<small>${escape(run.at)}${run.seconds?' · '+run.seconds+' 秒':''}</small></button>`).join('')||empty('当前没有运行记录')}
     </aside><article>${current?`<header class="run-summary"><div><h2>第 ${executions.length-current.index} 次执行</h2><small>${escape(current.run.at)} · 北京时间</small></div>${taskRunBadge(current.run)}</header>
       <details><summary>本次任务指令</summary><p>${escape(current.run.prompt||task.description)}</p></details>
-      <div class="run-result"><h3>${current.run.example?'案例执行结果':'执行结果'}</h3><div class="formatted-text">${renderMarkdown(current.run.text)}</div>${current.run.files?`<div class="response-files">${current.run.files.map(id=>byId('files',id)).filter(Boolean).map(file=>fileButton(file)).join('')}</div>`:''}</div>
+      <div class="run-result"><h3>${current.run.status==='running'?'执行中':current.run.example?'案例执行结果':'执行结果'}</h3><div class="formatted-text">${renderMarkdown(current.run.text || (current.run.status==='running'?'后台正在执行，完成后将在这里显示结果。':''))}</div>${current.run.files?`<div class="response-files">${current.run.files.map(id=>byId('files',id)).filter(Boolean).map(file=>fileButton(file)).join('')}</div>`:''}</div>
       ${current.run.logs?.length?`<details><summary>过程日志 · ${current.run.logs.length} 行</summary><ol>${current.run.logs.map(log=>`<li>${escape(log)}</li>`).join('')}</ol></details>`:''}`:
-      empty('执行一次任务后，可以在这里查看结果与处理记录。')}</article></div></div>`;
+      empty(executions.length?'当前筛选没有匹配的记录。':'执行一次任务后，可以在这里查看结果与处理记录。')}</article></div></div>`;
 }
 const graphTones=['blue','teal','violet','gold','slate','cyan'];
 function knowledgeGraph(note) {
@@ -781,9 +810,9 @@ function knowledge() {
       <div class="segments" role="group" aria-label="知识库模式">${[['read','阅读','book-open'],['graph','图谱','workflow']].map(([id,label,glyph])=>button(label,'note-view',{id,glyph,extra:`aria-pressed="${noteView===id}"`})).join('')}</div>
       ${button('新建笔记','edit',{primary:true,glyph:'plus',extra:'data-collection="knowledge"'})}</header>
     <div class="vault-body"><aside class="vault-tree"><details class="note-index"${innerWidth>720?' open':''}><summary>笔记目录 <small>${state.knowledge.length} 篇</small>${icon('chevron-down')}</summary>
-      <div id="notes">${Object.entries(groups).map(([label,items],index)=>`<details class="note-folder ${graphTones[index%graphTones.length]}" open><summary>${icon('chevron-down')}<i></i>${escape(label)}<small>${items.length}</small></summary>${items.map(item=>`<div data-search="${escape(item.name+' '+item.description+' '+item.body)}"><button class="note-link${item.id===note?.id?' active':''}" data-action="note" data-id="${item.id}" aria-pressed="${item.id===note?.id}">${icon('file-text')}${escape(item.name)}</button></div>`).join('')}</details>`).join('')||empty('暂无笔记')}</div></details></aside>
+      <div id="notes">${Object.entries(groups).map(([label,items],index)=>`<details class="note-folder ${graphTones[index%graphTones.length]}" open><summary>${icon('chevron-down')}<i></i>${escape(label)}<small>${items.length}</small></summary>${items.map(item=>`<div data-search="${escape(item.name+' '+item.description+' '+item.body)}"><button class="note-link${item.id===note?.id?' active':''}" data-action="note" data-id="${item.id}" aria-pressed="${item.id===note?.id}">${icon('file-text')}${escape(item.name)}</button></div>`).join('')}</details>`).join('')||empty('暂无笔记')}<p class="empty note-search-empty" role="status" hidden>没有匹配的笔记，试试标题或正文中的关键词。</p></div></details></aside>
     <article class="vault-reader">${!note ? empty('选择一篇笔记查看内容。') : noteView==='graph' ? knowledgeGraph(note):
-      `<header class="note-heading"><div><p>${escape(note.description || '笔记')}</p><h2>${escape(note.name)}</h2></div><div class="row-actions">${button('编辑','edit',{id:note.id,extra:'data-collection="knowledge"'})}${button('删除','delete',{id:note.id,extra:'data-collection="knowledge"'})}</div></header>
+      `<header class="note-heading"><div><p>${escape(note.description || '笔记')}</p><h2>${escape(note.name)}</h2></div><div class="row-actions">${button('引用到对话','use-note',{id:note.id,glyph:'messages-square'})}${button('编辑','edit',{id:note.id,extra:'data-collection="knowledge"'})}${button('删除','delete',{id:note.id,extra:'data-collection="knowledge"'})}</div></header>
         <div class="note-body">${paragraphs.map((paragraph,index)=>{const [title,...lines]=paragraph.split('\n');return lines.length?`<section><h3 id="note-section-${index}" tabindex="-1">${escape(title)}</h3><p class="preserve-lines">${escape(lines.join('\n'))}</p></section>`:`<p>${escape(title)}</p>`;}).join('')}</div>
         ${example?`<section class="note-practice"><h3>${icon('book-open')}案例核对 · ${escape(example.label)}</h3><p>${escape(practice.text)}</p>
         <div>${exampleInput?fileButton(exampleInput):''}${button('查看案例对话','open-example',{id:example.id,glyph:'arrow-right'})}</div></section>`:''}`}</article>
@@ -839,6 +868,7 @@ function libraryFileActions(file) {
 }
 function fileResults() {
   const visible=visibleFiles();
+  if(!state.files.length)return `<div class="library-empty">${icon('folder-open')}<h3>暂无文件</h3>${uploadControl('上传第一份文件','files')}</div>`;
   if (!visible.length) return `<div class="library-empty">${icon('search')}<h3>没有匹配的文件</h3>${fileQuery||fileType!=='all'||caseFilter!=='all'?button('清除筛选','file-case',{id:'all'}):''}</div>`;
   if(libraryLayout==='grid') return `<div class="file-gallery">${visible.map(file=>fileTile(file,true)).join('')}</div>`;
   return `<div class="library-list">${visible.map(file => `<div class="library-row"><button type="button" class="library-open" data-action="file-preview" data-id="${escape(file.id)}">${fileBadge(file)}<span><strong>${escape(file.name)}</strong><small>${escape(file.hint||fileCategory(file))}</small></span></button>
@@ -882,7 +912,7 @@ function collection(key) {
   const staffControls=key==='staff'?`<div class="segments" role="group" aria-label="员工来源">${[['own','我的员工',state.staff.length,'users-round'],['market','员工市场',marketStaff.length,'store']].map(([id,label,count,glyph])=>`<button type="button" class="button" data-action="staff-tab" data-id="${id}" aria-pressed="${staffTab===id}">${icon(glyph)}${label}<small>${count}</small></button>`).join('')}</div>`:'';
   const marketList=key==='staff'&&staffTab==='market';
   const items=marketList?marketStaff:state[key];
-  return `<div class="page collection-page">${heading(title,description,action ? options : '')}
+  return `<div class="page collection-page">${heading(title,description,action && !marketList ? options : '')}
     <div class="collection-toolbar">${staffControls}<label class="list-search search-field">${icon('search')}<input type="search" aria-label="搜索${title}" placeholder="${key==='staff'?(marketList?'搜索员工市场':'搜索我的员工'):'搜索名称或说明…'}" data-filter="#collection-list"></label></div>
     <div class="cards-grid" id="collection-list">${items.map(item => {
     const installed = state.skills.some(skill=>skill.marketId === item.id);
@@ -893,7 +923,7 @@ function collection(key) {
     }else if(key==='staff'){
       const names=(item.skills||[]).map(id=>byId('skills',id)?.name).filter(Boolean);
       binding=bindingLine('已绑技能',names.join('、')||'尚未配置');
-      const sources=[item.vault?'团队业务资料':'',byId('database',item.database)?.name].filter(Boolean);
+      const sources=[byId('knowledge',item.note)?.name,byId('database',item.database)?.name].filter(Boolean);
       context=bindingLine('可用资料',sources.join('、')||'可在对话中添加附件');
     }else if(key==='skills'){
       const people=state.staff.filter(person=>person.skills?.includes(item.id));
@@ -912,7 +942,7 @@ function collection(key) {
 }
 function staffDetail(person) {
   const tasks = state.tasks.filter(task => task.assignee === person.id);
-  const resources=[['技能',person.skills?.map(id=>byId('skills',id)?.name).filter(Boolean).join('、')],['知识库',person.vault?'团队业务资料':''],['数据库',byId('database',person.database)?.name],['模型',connection.available?connection.name:modelLabel()]];
+  const resources=[['技能',person.skills?.map(id=>byId('skills',id)?.name).filter(Boolean).join('、')],['知识库',byId('knowledge',person.note)?.name],['数据库',byId('database',person.database)?.name],['模型',connection.available?connection.name:modelLabel()]];
   modal(person.name,`<dl class="record-facts"><div><dt>擅长方向</dt><dd>${escape(person.specialty || '通用')}</dd></div><div><dt>工作职责</dt><dd>${escape(person.description || '暂无说明')}</dd></div></dl>
     <div class="detail-block"><h3>能力绑定</h3><dl class="record-facts">${resources.map(([label,value])=>`<div><dt>${label}</dt><dd>${escape(value||'未配置')}</dd></div>`).join('')}</dl></div>
     ${tasks.length ? `<div class="detail-block"><h3>已分配的定时任务</h3><ul>${tasks.map(task=>`<li>${escape(task.name)}</li>`).join('')}</ul>${link('查看定时任务','tasks','clock')}</div>` : ''}
@@ -948,7 +978,7 @@ function database() {
       <header><span class="tile-icon">${icon('database')}</span><div><h2>${escape(item.name)}</h2><p>${escape(item.description)}</p></div></header>
       <div class="schema-caption"><code>${escape(source?.table||item.table||item.database||'—')}</code><small>${fields.length?fields.length+' 个字段':'待连接'}</small></div>
       ${structure}${source?.analysis?`<section class="source-analysis"><h3>${escape(source.analysis.title)}</h3><p>${escape(source.analysis.description)}</p>
-      ${button('查看核对明细','query-db',{id:item.id,extra:'data-query="analysis"',glyph:'arrow-right'})}</section>`:''}<footer><small>${escape(item.engine)}</small><div class="row-actions">${item.source?button('查询数据','query-db',{id:item.id,glyph:'database'}):''}${source||!canManageConnections()?'':button(item.engine==='CSV'?'替换数据':item.remoteConnection?'编辑':'连接',item.engine==='CSV'?'import-csv':'edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></footer>
+      ${button('查看核对明细','query-db',{id:item.id,extra:'data-query="analysis"',glyph:'arrow-right'})}</section>`:''}<footer><small>${escape(item.engine)}</small><div class="row-actions">${item.source?button('查询数据','query-db',{id:item.id,glyph:'database'})+button('引用到对话','use-database',{id:item.id,glyph:'messages-square'}):''}${source||!canManageConnections()?'':button(item.engine==='CSV'?'替换数据':item.remoteConnection?'编辑':'连接',item.engine==='CSV'?'import-csv':'edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></footer>
     </article>`;
   });
   return `<div class="page database-page">${heading('数据库','查看数据源的字段和口径，打开查询即可核对实际记录。',canManageConnections()?'<div class="row-actions">'+button('导入 CSV','import-csv',{glyph:'upload'})+button('新增连接','edit',{primary:true,glyph:'plus',extra:'data-collection="database"'})+'</div>':'')}
@@ -1191,7 +1221,22 @@ function filterRows(input){
   if(!target)return;
   const term=input.value.trim().toLowerCase();
   for(const row of target.querySelectorAll('[data-search]'))row.hidden=!row.dataset.search.toLowerCase().includes(term);
-  if(target.id==='notes'&&term)document.querySelector('.note-index').open=true;
+  if(target.id==='notes'){
+    if(term)target.closest('.note-index').open=true;
+    for(const folder of target.querySelectorAll('.note-folder')){
+      const count=folder.querySelectorAll('[data-search]:not([hidden])').length;
+      folder.hidden=count===0;
+      folder.querySelector('summary small').textContent=count;
+      if(term && count)folder.open=true;
+    }
+    target.querySelector('.note-search-empty').hidden=!term||!state.knowledge.length||!!target.querySelector('[data-search]:not([hidden])');
+  }
+  if(target.id==='chat-list'){
+    const count=target.querySelectorAll('.history-row:not([hidden])').length;
+    target.closest('.chat-history').querySelector('.history-label small').textContent=count;
+    const end=target.querySelector('.history-end');
+    if(end)end.textContent=term?(count?'找到 '+count+' 个会话':'没有匹配的会话'):'没有更多了';
+  }
   if(target.id==='resource-list'){
     const empty=target.parentElement.querySelector('.picker-empty');
     empty.hidden=!term||!!target.querySelector('[data-search]:not([hidden])')||!target.querySelector('[data-search]');
@@ -1258,7 +1303,8 @@ function render({keepDraft = true, bottom = true,preserveInputs=true} = {}) {
   routeDetail=detail || '';
   page = Object.hasOwn(pageNames,key) ? key : 'home';
   const route=page+'/'+routeDetail;
-  if (page==='chat') activeChat=routeDetail?byId('chats',routeDetail)?.id:undefined;
+  if(page==='chat')activeChat=byId('chats',routeDetail)?.id;
+  if(page==='chat'||page==='home')lastComposerRoute=route;
   const sameRoute=oldRoute===route;
   const helpFocus=!sameRoute && page==='help' && document.activeElement?.closest('.help-index,.help-picker');
   const restoreInputs=sameRoute&&preserveInputs?restoreInputsAfterPaint():()=>{};
@@ -1336,7 +1382,7 @@ function editForm(key,id) {
     if (['relationship','staff','files'].includes(type)) {
       const options = state[type === 'relationship' ? 'knowledge' : type];
       const placeholder = type === 'staff' ? '通用助手' : '无';
-      return `<label>${label}<select name="${name}"><option value="">${placeholder}</option>${options.filter(option=>option.id!==id).map(option=>`<option value="${option.id}"${selected(option.id,value)}>${escape(option.name)}</option>`).join('')}</select></label>`;
+      return `<label>${label}<select name="${name}"><option value="">${placeholder}</option>${options.filter(option=>type!=='relationship'||option.id!==id).map(option=>`<option value="${option.id}"${selected(option.id,value)}>${escape(option.name)}</option>`).join('')}</select></label>`;
     }
     if (type==='textarea') return `<label>${label}<textarea name="${name}" rows="4" maxlength="4000"${name==='body'||key==='tasks'?' required':''}>${escape(value)}</textarea></label>`;
     return `<label>${label}<input name="${name}" type="${type||'text'}" value="${escape(value)}" maxlength="180" ${['name','time','host','database','port','url'].includes(name)?'required':''} ${type==='number'?'min="1" max="65535"':''}></label>`;
@@ -1344,9 +1390,9 @@ function editForm(key,id) {
   const deleteAction=existing && ['projects','tasks'].includes(key) ? button('删除','delete',{id,extra:`data-collection="${key}"`}) : '';
   const footer=(extras='',save='保存')=>`<footer class="dialog-footer">${button('取消','close')}${extras}<button class="button primary" type="submit">${save}</button></footer>`;
   let content=controls.join('')+footer(deleteAction);
-  const choose=(field,label,collection)=>`<label>${label}<select name="${field}"><option value="">无</option>${state[collection].filter(row=>collection!=='files'||fileText(row)).map(row=>`<option value="${escape(row.id)}"${selected(row.id,item[field])}>${escape(row.name)}</option>`).join('')}</select></label>`;
+  const choose=(field,label,collection)=>`<label>${label}<select name="${field}"><option value="">无</option>${state[collection].filter(row=>collection==='database'?Boolean(row.source):collection!=='files'||fileText(row)).map(row=>`<option value="${escape(row.id)}"${selected(row.id,item[field])}>${escape(row.name)}</option>`).join('')}</select></label>`;
   if(key==='skills')content=controls.join('')+`<label>执行要求<textarea name="instructions" rows="5" maxlength="4000" placeholder="写下处理步骤、输出格式和需要核对的事项">${escape(item.instructions||'')}</textarea></label>`+footer();
-  if(key==='staff')content=controls.join('')+`<fieldset class="form-section"><legend>工作资源</legend>${state.skills.map(skill=>`<label class="check-row"><input type="checkbox" name="skills" value="${escape(skill.id)}"${item.skills?.includes(skill.id)?' checked':''}>${escape(skill.name)}</label>`).join('')}${choose('note','默认参考笔记','knowledge')}${choose('database','默认数据库','database')}</fieldset>`+footer();
+  if(key==='staff')content=controls.join('')+`<fieldset class="form-section"><legend>工作资源</legend><p>勾选员工可用的技能。新对话默认使用下方第一个勾选项，可在输入框中切换。</p>${state.skills.map(skill=>`<label class="check-row"><input type="checkbox" name="skills" value="${escape(skill.id)}"${item.skills?.includes(skill.id)?' checked':''}>${escape(skill.name)}</label>`).join('')}${choose('note','默认参考笔记','knowledge')}${choose('database','默认数据库','database')}</fieldset>`+footer();
   if(key==='knowledge')content=(id?'':choose('importNote','从已有文件填入正文','files'))+controls.join('')+footer();
   if (key==='tasks') content=`<ol class="wizard-steps"><li>AI 自动化</li><li aria-current="step">配置任务</li><li>设定调度</li></ol>
     <section data-task-step="config"><h3>告诉助手要完成什么</h3><p>描述任务与交付要求，再选择负责执行的助手。</p>
@@ -1405,8 +1451,11 @@ async function answer(messages, onProgress = () => {}) {
   const encoder=new TextEncoder();
   while (encoder.encode(JSON.stringify({messages:turns})).byteLength>58_000) {
     if (turns.length>1) { turns.splice(0,Math.min(2,turns.length-1)); continue; }
-    if (!turns[0].resources?.length) break;
-    turns[0].resources=turns[0].resources.slice(0,-1);
+    const excerpts=turns[0].resources||[];
+    const longest=excerpts.reduce((max,item)=>Math.max(max,item.text?.length||0),0);
+    if(!longest)throw Error('本条消息超过长度限制，请缩短问题后重试。');
+    const limit=Math.floor(longest*.75);
+    turns[0].resources=excerpts.map(item=>item.text.length>limit?{...item,text:item.text.slice(0,limit)}:item);
   }
   let response;
   try {
@@ -1500,7 +1549,9 @@ let extractingForChat=false;
 async function send(prompt, existingId, replySource) {
   if(extractingForChat)return;
   const originRoute=page+'/'+routeDetail;
-  const toRead=filesForDraft().map(id=>byId('files',id)).filter(needsExtraction);
+  const attachments=filesForDraft().filter(id=>byId('files',id));
+  if(attachments.length>attachmentLimit){toast(attachmentLimitMessage);return;}
+  const toRead=attachments.map(id=>byId('files',id)).filter(needsExtraction);
   if(toRead.length){
     extractingForChat=true;toast('正在提取所选 PDF 或图片中的文字…');
     try{for(const file of toRead)await extractFile(file);}
@@ -1510,14 +1561,14 @@ async function send(prompt, existingId, replySource) {
   const chat = byId('chats',existingId);
   if (chat && loading.has(chat.id)) return;
   const target = chat || {id:uid(),title:prompt.slice(0,30),messages:[]};
-  if (!chat && activeStaff) target.staff=activeStaff;
+  const selections=resourcesForDraft(originRoute);
+  if(!chat && selections.staff)target.staff=selections.staff;
   if (!chat) { state.chats.unshift(target); archivedChats=false; }
-  const skill = byId('skills',selectedSkill);
+  const skill = byId('skills',selections.skills);
   const person=byId('staff',target.staff);
-  const note = byId('knowledge',selectedNote);
-  const database = byId('database',selectedDatabase);
+  const note = byId('knowledge',selections.knowledge);
+  const database = byId('database',selections.database);
   const at=new Date().toISOString();
-  const attachments=filesForDraft().filter(id=>byId('files',id));
   const resource=(kind,item,text) => item && {
     kind,name:item.name.slice(0,160),text:referenceText(text,prompt),
   };
@@ -1527,13 +1578,17 @@ async function send(prompt, existingId, replySource) {
     resource('knowledge',note,note?.body),
     database && {...resource('database',database,''),source:database.source},
     resource('attachment',replySource && {name:'所选回复'},replySource),
-    ...attachments.slice(0,6).map(id=>{
+    ...attachments.map(id=>{
       const file=byId('files',id);
       return resource('attachment',file,fileText(file) || '这份附件没有可用的文本内容。');
     }),
     state.memoryEnabled && state.preferences && resource('preference',{name:'回复偏好'},state.preferences),
   ].filter(Boolean);
-  drafts.delete(page+'/'+routeDetail);
+  if(!chat){
+    draftResources.set('chat/'+target.id,selections);
+    draftResources.delete(originRoute);
+  }
+  drafts.delete(originRoute);
   const submitted=document.querySelector('#message,#home-input');
   if (submitted) submitted.value='';
   target.messages.push({role:'user',text:prompt,resources,at,attachments});
@@ -1620,9 +1675,21 @@ function openExample(id) {
   }
   openChat(chat.id);
 }
+function referenceRoute(){
+  if(lastComposerRoute==='home/'){
+    const homeHasDraft=document.querySelector('#home-input')?.value || drafts.get('home/') || draftAttachments.get('home/')?.length || Object.keys(draftResources.get('home/')||{}).length;
+    if(homeHasDraft)return 'home/';
+  }
+  const id=lastComposerRoute.split('/')[1];
+  return id && byId('chats',id)?'chat/'+id:'chat/';
+}
+function showComposer(route,{keepDraft=true}={}){
+  focusComposer=true;picker='';
+  if(compactChat()){historyOpen=false;spaceOpen=false;}
+  go(route.replace(/\/$/,''),{keepDraft});
+}
 function openChat(id) {
   activeChat=id;
-  activeStaff='';
   picker='';
   showConversationStart=!!byId('chats',id)?.example;
   if(compactChat())historyOpen=false;
@@ -1784,6 +1851,7 @@ async function previewBrandAsset(input) {
 }
 async function upload(file, target, forChat) {
   const attachmentRoute=page+'/'+routeDetail;
+  if(target==='attachment' && filesForDraft(attachmentRoute).filter(id=>byId('files',id)).length>=attachmentLimit){toast(attachmentLimitMessage);return;}
   if(!file.size||file.size>4_000_000){toast('请选择非空且不超过 4 MB 的文件');return;}
   const suffix = file.name.toLowerCase().split('.').at(-1);
   const text = ['md','csv','txt'].includes(suffix);
@@ -1817,7 +1885,11 @@ async function upload(file, target, forChat) {
     else if (target==='space') chat.attachments.pop();
     return;
   }
-  if (target==='attachment') filesForDraft(attachmentRoute).push(item.id);
+  if(target==='attachment'){
+    const attached=filesForDraft(attachmentRoute);
+    if(attached.filter(id=>byId('files',id)).length>=attachmentLimit){render({bottom:false});toast('文件已保存到文件管理。'+attachmentLimitMessage);return;}
+    attached.push(item.id);
+  }
   if (target==='space') {workspaceScope='current';spaceSource='attached';spaceType='all';spaceSearch='';if (newChat && page==='chat') go('chat/'+chat.id);}
   fileType='all';caseFilter='all';fileQuery='';
   render({bottom:false});
@@ -1920,7 +1992,7 @@ document.addEventListener('click',async event=>{
     }
     case 'composer-settings':
       modal('对话设置',`<div class="detail-block"><h3>当前模型</h3><p>${escape(connection.name||modelLabel())}</p></div>
-      <footer class="dialog-footer">${link('打开个人设置','settings','settings')}${button('完成','close',{primary:true})}</footer>`);break;
+      <footer class="dialog-footer">${link('模型管理','models','boxes')}${link('个人设置','settings','settings')}${button('完成','close',{primary:true})}</footer>`);break;
     case 'prompt': await send(id);break;
     case 'use-command': {
       const field=document.querySelector('#home-input');
@@ -1966,9 +2038,7 @@ document.addEventListener('click',async event=>{
         try{await activateModel(id);}catch(error){toast(error.message);break;}
       }
       if(picker!==category || location.hash!==route)return;
-      if (picker==='skills') selectedSkill=id;
-      if (picker==='knowledge') selectedNote=id;
-      if (picker==='database') selectedDatabase=id;
+      if(picker!=='models')resourcesForDraft()[picker]=id;
       const target=document.querySelector('#message,#home-input');
       const caret=Math.min(target.value.length,pickerCaret);
       const head=target.value.slice(0,caret);
@@ -1980,28 +2050,22 @@ document.addEventListener('click',async event=>{
       break;
     }
     case 'remove-resource':
-      if (id==='skills') selectedSkill='';
-      if (id==='knowledge') selectedNote='';
-      if (id==='database') selectedDatabase='';
+      delete resourcesForDraft()[id];
       render({bottom:false});break;
     case 'remove-attachment': draftAttachments.set(page+'/'+routeDetail,filesForDraft().filter(item=>item!==id));render({bottom:false});break;
     case 'open-example': openExample(id); break;
     case 'open-chat': openChat(id);break;
-    case 'new-chat': drafts.delete('chat/');activeChat=undefined;activeStaff='';picker='';draftAttachments.delete('chat/');go('chat',{keepDraft:page!=='chat'||Boolean(routeDetail)});document.querySelector('#message')?.focus();break;
+    case 'new-chat': drafts.delete('chat/');activeChat=undefined;draftResources.delete('chat/');draftAttachments.delete('chat/');showComposer('chat/',{keepDraft:page!=='chat'||Boolean(routeDetail)});break;
     case 'staff-detail': staffDetail(byId('staff',id));break;
     case 'staff-chat': {
       const person = byId('staff',id);
       dialog.close();
-      activeStaff=id;
+      draftResources.set('chat/',{staff:id,skills:person.skills?.find(skill=>byId('skills',skill)),knowledge:person.note,database:person.database});
       activeChat=undefined;
       draftAttachments.delete('chat/');drafts.delete('chat/');
-      selectedSkill=person.skills?.find(skill=>byId('skills',skill))||'';
-      selectedNote=person.note||'';
-      selectedDatabase=person.database||'';
-      go('chat',{keepDraft:page!=='chat'||Boolean(routeDetail)});document.querySelector('#message')?.focus();
-      break;
+      showComposer('chat/',{keepDraft:page!=='chat'||Boolean(routeDetail)});break;
     }
-    case 'staff-tab': staffTab=id;render();break;
+    case 'staff-tab': staffTab=id;render({preserveInputs:false});break;
     case 'hire-staff':
       if(!byId('staff',id)){state.staff.push({...marketStaff.find(person=>person.id===id)});save();render();toast('已加入我的员工');}
       break;
@@ -2016,7 +2080,16 @@ document.addEventListener('click',async event=>{
       break;
     }
     case 'try-skill':
-      selectedSkill=id;activeChat=undefined;activeStaff='';draftAttachments.delete('chat/');drafts.delete('chat/');dialog.close();go('chat',{keepDraft:page!=='chat'||Boolean(routeDetail)});document.querySelector('#message')?.focus();break;
+    case 'use-note':
+    case 'use-database': {
+      const kind={'try-skill':'skills','use-note':'knowledge','use-database':'database'}[action];
+      const item=byId(kind,id);
+      if(!item || (kind==='database' && !item.source))break;
+      const route=referenceRoute();
+      resourcesForDraft(route)[kind]=id;
+      if(dialog.open)dialog.close();
+      showComposer(route);break;
+    }
     case 'select-team': activeTeam=id;render();break;
     case 'note': activeNote=id;render();break;
     case 'note-section': {
@@ -2126,9 +2199,12 @@ document.addEventListener('click',async event=>{
       }
       const stored=key==='files' && byId('files',id)?.storedOffice;
       state[key]=state[key].filter(item=>item.id!==id);
-      if (key==='chats'&&id===activeChat) activeChat=state.chats[0]?.id;
+      if(key==='chats'){
+        drafts.delete('chat/'+id);draftAttachments.delete('chat/'+id);draftResources.delete('chat/'+id);
+        if(lastComposerRoute==='chat/'+id)lastComposerRoute='chat/';
+      }
       if(save() && stored) await removeOfficeFile(id).catch(()=>{});
-      dialog.close();render();toast('已删除');break;
+      dialog.close();if(key==='chats' && page==='chat' && routeDetail===id)go('chat',{keepDraft:false});else render();toast('已删除');break;
     }
     case 'file-preview':
       if (dialog.open && !dialog.dataset.file) {
@@ -2139,15 +2215,12 @@ document.addEventListener('click',async event=>{
     case 'ask-file': {
       const file=byId('files',id);
       if (!file) break;
-      const current=page==='chat'?byId('chats',activeChat):null;
-      const owner=current || state.chats.find(chat=>chat.example && chat.messages.some(m=>m.files?.includes(id)||m.attachments?.includes(id)));
+      const route=referenceRoute();
+      const attached=filesForDraft(route);
+      if(!attached.includes(id) && attached.filter(fileId=>byId('files',fileId)).length>=attachmentLimit){toast(attachmentLimitMessage);break;}
       dialog.close();
-      if (!current) {activeStaff='';selectedSkill='';selectedNote='';selectedDatabase='';}
-      const attached=filesForDraft('chat/'+(owner?.id||''));
       if(!attached.includes(id))attached.push(id);
-      focusComposer=true;spaceOpen=false;picker='';
-      if(compactChat())historyOpen=false;
-      go(owner?'chat/'+owner.id:'chat');
+      spaceOpen=false;showComposer(route);
       break;
     }
     case 'preview-sheet': preview(byId('files',id),Number(control.dataset.sheet));dialog.querySelector('.sheet-tabs [aria-pressed=true]')?.focus({preventScroll:true});break;
@@ -2192,7 +2265,7 @@ document.addEventListener('click',async event=>{
       if(page==='models'){render();toast(modelLabel());}
       break;
     case 'reset': if(account){toast('已登录的共享工作空间请逐项管理数据');break;}modal('恢复示例数据',`<p>当前浏览器中的编辑和上传会被替换为初始示例。</p><footer class="dialog-footer">${button('取消','close')}${button('确认恢复','confirm-reset',{primary:true})}</footer>`);break;
-    case 'confirm-reset': drafts.clear();draftAttachments.clear();caseFilter='all';fileQuery='';homeTab='cases';state=load(true);activeChat=state.chats[0]?.id;activeNote=state.knowledge[0]?.id;if(save())await removeOfficeFile().catch(()=>{});dialog.close();render();break;
+    case 'confirm-reset': drafts.clear();draftAttachments.clear();draftResources.clear();caseFilter='all';fileQuery='';homeTab='cases';state=load(true);activeChat=state.chats[0]?.id;activeNote=state.knowledge[0]?.id;if(save())await removeOfficeFile().catch(()=>{});dialog.close();render();break;
   }
   if (['file-case','library-layout','schedule-day','overview-stage','task-view','project-tab'].includes(action)) {
     const target=app.querySelector(`[data-action="${action}"][data-id="${CSS.escape(id)}"]`) || app.querySelector('.library-controls input');
@@ -2415,7 +2488,7 @@ async function boot(){
     }
   }
 render();
-void syncConnections().then(()=>{if(['models','database','settings'].includes(page)&&!dialog.open)render({bottom:false});}).catch(()=>{connectionCatalogError='暂时无法载入已保存的连接';if(page==='models'&&!dialog.open)render({bottom:false});});
+void syncConnections().then(()=>{if((['models','database','settings'].includes(page)||['models','database'].includes(picker))&&!dialog.open)render({bottom:false});}).catch(()=>{connectionCatalogError='暂时无法载入已保存的连接';if(page==='models'&&!dialog.open)render({bottom:false});});
 void modelStatus().then(result=>{
   if (!connection.checking) return;
   connection=result;
