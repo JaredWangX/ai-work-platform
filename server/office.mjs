@@ -7,15 +7,17 @@ const officeFormats = {
 };
 export function requestedOffice(entries) {
   const text=entries.at(-1).content;
+  const destination=text.match(/(?:放入|放进|放到|写入|存为|保存为)\s*(?:一个|一份|一张)?\s*(?:可编辑的|新的)?\s*(?:Excel\b|Word\b|PPTX?\b|PowerPoint\b|工作簿|电子表格|文档|幻灯片)/i);
+  if (destination && /怎么|如何|怎样|教我|不要|不用|不必|无需/.test(text.slice(0,destination.index))) return [];
   if (/(?:怎么|如何|怎样|为什么|教我|原理|how (?:do|can|to)|explain).{0,24}(?:制[作]|生成|导出|用|使用|create|generate)|(?:不要|无需|不用|不必|don't|do not).{0,8}(?:文件|文档|导出|生成|制作|创建)|(?:只要|只需).{0,4}(?:文字|文本)|(?:能|支持).{0,24}(?:吗[？?]?$)/i.test(text)) return [];
   if (/(?:解释|分析|读取|介绍|解读|比较|extract|explain|analy[sz]e|summari[sz]e)/i.test(text) &&
       !/(?:交付|输出|生成|制作|导出|创建|写一份|做[个份一]|出一份|转成|转为|create|generate|export)/i.test(text))return [];
   const action=/(交付|输出|转换成|转成|转为|改成|改为|生成|整理成|整理一|做[个份一下成]|制作|导出|转[成为换]|写[个份一]|给我|帮我|创建|出[一份个]|编制|起草|设计.{0,4}(?:一份|一套)|create|make|prepare|export|generate|build|draft|turn .+ into)/i.test(text);
   const explicit={docx:/\b(?:word|docx)\b|(?<!演示)文档/i,pptx:/powerpoint|pptx?\b|幻灯片|演示文稿/i,xlsx:/excel\b|xlsx\b|工作簿|电子表格/i};
   const formats=Object.keys(officeFormats);
-  if (action) {
+  if (action || destination) {
     // A source workbook in “把 Excel 转成 PPT” is not a requested output.
-    const target=text.replace(/^.*?(?:转成|转为|转换(?:为|成)|整理成|导出为|输出为|convert .+? (?:into|to) |turn .+? into )/i,'')
+    const target=(destination ? text.slice(destination.index) : text).replace(/^.*?(?:转成|转为|转换(?:为|成)|整理成|导出为|输出为|convert .+? (?:into|to) |turn .+? into )/i,'')
       .replace(/(?:根据|参考|读取|基于|结合|利用|用)(?:上传的|这份|附件中?的?)?[^，。；]{0,70}?(?=生成|制作|创建|编制|起草|做一|写一)/g,'')
       .replace(/(?:中|里面)的(?:数据|内容|信息)/g,'');
     const names=formats.filter(f=>explicit[f].test(target));

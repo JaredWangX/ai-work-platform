@@ -44,14 +44,15 @@ jobs:
           openssl x509 -in "$dir/fullchain.pem" -noout -checkhost "$SERVICE_DOMAIN"
           if gh release view service-certificate >/dev/null 2>&1; then
             gh release upload service-certificate "$dir/fullchain.pem" --clobber
+            gh release edit service-certificate --notes-file "$dir/fullchain.pem"
           else
             gh release create service-certificate "$dir/fullchain.pem" --latest=false \
-              --title 'Public service certificate' --notes 'Public certificate chain for the workspace HTTPS endpoint.'
+              --title 'Public service certificate' --notes-file "$dir/fullchain.pem"
           fi
       - name: Check the address of the service
         env:
           SERVICE_DNS_TOKEN: ${{ secrets.SERVICE_DNS_TOKEN }}
         run: |
-          if ! dig +short A "$SERVICE_DOMAIN" | grep -Fxq "$SERVICE_IPV4"; then
+          if [[ "${{ steps.check.outputs.renew }}" == 'true' ]] || ! dig +short A "$SERVICE_DOMAIN" | grep -Fxq "$SERVICE_IPV4"; then
             python3 .github/service-tls/dns.py address
           fi

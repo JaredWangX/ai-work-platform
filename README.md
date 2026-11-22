@@ -2,7 +2,7 @@
 
 把一个业务问题从提问带到交付。你可以在对话中选择数据源，让助手查数，下载可编辑的 Word、PowerPoint 或 Excel，也可以把相同的指令设为每天自动执行的任务。这是一个使用合成业务数据的交互式产品作品。
 
-[打开公开工作台](https://jaredwangx.github.io/ai-work-platform/) · [体验数据库查询](https://jaredwangx.github.io/ai-work-platform/#database) · [查看自动化任务](https://jaredwangx.github.io/ai-work-platform/#tasks)
+[打开公开工作台](https://jaredwangx.github.io/ai-work-platform/) · [云服务器直连](https://ai-work-platform-demo.freemyip.com:19558/) · [体验数据库查询](https://jaredwangx.github.io/ai-work-platform/#database) · [查看自动化任务](https://jaredwangx.github.io/ai-work-platform/#tasks)
 
 网站前端从本仓库的 main 分支发布到 GitHub Pages。聊天、数据库查询、任务和文件生成由自建服务器处理。Pages 的静态资源使用项目相对路径，访客可直接从仓库右侧的 Website 进入。
 
