@@ -1,0 +1,57 @@
+name: Renew service certificate
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '42 3 * * 2'
+permissions:
+  contents: write
+concurrency: service-certificate
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SERVICE_DOMAIN: ai-work-platform-demo.freemyip.com
+      SERVICE_IPV4: 111.6.14.232
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check published certificate
+        id: check
+        run: |
+          if gh release download service-certificate -p fullchain.pem -D "$RUNNER_TEMP" &&
+             openssl x509 -in "$RUNNER_TEMP/fullchain.pem" -checkend 3024000 -noout; then
+            echo 'renew=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'renew=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Issue using the public certificate request
+        if: steps.check.outputs.renew == 'true'
+        env:
+          SERVICE_DNS_TOKEN: ${{ secrets.SERVICE_DNS_TOKEN }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/acme"
+          "$RUNNER_TEMP/acme/bin/pip" -q install 'certbot>=4,<6'
+          dir="$RUNNER_TEMP/issued"
+          mkdir -p "$dir"
+          "$RUNNER_TEMP/acme/bin/certbot" certonly --manual --preferred-challenges dns \
+            --non-interactive --agree-tos --register-unsafely-without-email \
+            --config-dir "$dir/config" --work-dir "$dir/work" --logs-dir "$dir/logs" \
+            --manual-auth-hook "python3 '$PWD/.github/service-tls/dns.py' authorize" \
+            --manual-cleanup-hook "python3 '$PWD/.github/service-tls/dns.py' cleanup" \
+            --csr .github/service-tls/request.pem --cert-path "$dir/cert.pem" \
+            --chain-path "$dir/chain.pem" --fullchain-path "$dir/fullchain.pem"
+          openssl x509 -in "$dir/fullchain.pem" -noout -checkhost "$SERVICE_DOMAIN"
+          if gh release view service-certificate >/dev/null 2>&1; then
+            gh release upload service-certificate "$dir/fullchain.pem" --clobber
+          else
+            gh release create service-certificate "$dir/fullchain.pem" --latest=false \
+              --title 'Public service certificate' --notes 'Public certificate chain for the workspace HTTPS endpoint.'
+          fi
+      - name: Check the address of the service
+        env:
+          SERVICE_DNS_TOKEN: ${{ secrets.SERVICE_DNS_TOKEN }}
+        run: |
+          if ! dig +short A "$SERVICE_DOMAIN" | grep -Fxq "$SERVICE_IPV4"; then
+            python3 .github/service-tls/dns.py address
+          fi
