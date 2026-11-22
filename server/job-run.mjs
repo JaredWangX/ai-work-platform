@@ -1,0 +1,14 @@
+import {readFile} from 'node:fs/promises';
+import {modelRoute} from './model.mjs';
+let input='';
+for await(const chunk of process.stdin)input+=chunk;
+const task=JSON.parse(input);
+const resources=[];
+if(task.instructions)resources.push({kind:'staff',name:'执行助手',text:task.instructions});
+if(task.source)resources.push({kind:'database',name:'演示业务库',source:task.source,text:''});
+const key=(await readFile('bridge-key','utf8')).trim();
+const env={MODEL_BRIDGE_URL:'http://127.0.0.1:6006/workspace-bridge',MODEL_BRIDGE_KEY:key};
+const request=new Request('http://localhost/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:task.description,resources}]})});
+const response=await modelRoute(request,env);
+if(!response.ok)process.exitCode=1;
+else process.stdout.write(await response.text());

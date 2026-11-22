@@ -1,0 +1,9 @@
+.taste-skill/
+qa/
+.DS_Store
+
+/dist/server/
+
+__pycache__/
+.runtime/
+workspace-data/
