@@ -88,8 +88,8 @@ export function teamSync({scope,read,persist,notify,canApply}){
       if(force?.[key]==='remote'||!equal(server,old)&&force?.[key]!=='local'){downloads.push(key);continue;}
       uploads.push(key);updates.push({key,parts:current,base:server});
     }
-    if(!base)base={};
-    for(const key of same){if(remote[key])base[key]=remote[key];else delete base[key];}
+    const checkpoint={...base};
+    for(const key of same){if(remote[key])checkpoint[key]=remote[key];else delete checkpoint[key];}
     const known=new Set(Object.values(remote).flat()),blocks=new Map();
     for(const key of uploads){
       const item=cache.get(key);if(!snapshot.has(key)||!item)continue;
@@ -99,8 +99,9 @@ export function teamSync({scope,read,persist,notify,canApply}){
     while(updates.length){
       const changes=updates.splice(0,80),r=await workspaceAPI('syncCommit',{params:{changes}});
       if(r.conflict){again=true;return;}
-      for(const {key,parts} of changes){if(parts.length)base[key]=parts;else delete base[key];}
-      localStorage.setItem(baseKey,JSON.stringify(base));
+      for(const {key,parts} of changes){if(parts.length)checkpoint[key]=parts;else delete checkpoint[key];}
+      localStorage.setItem(baseKey,JSON.stringify(checkpoint));
+      base={...checkpoint};
     }
     const incoming=new Map();
     await parallel(downloads,async key=>incoming.set(key,await receive(key,remote[key]||[])));
@@ -116,15 +117,15 @@ export function teamSync({scope,read,persist,notify,canApply}){
       const item=incoming.get(key);
       if(latest.get(key)!==snapshot.get(key)){again=true;continue;}
       if(!key.startsWith('office/'))apply(key,item);
-      if(remote[key])base[key]=remote[key];else delete base[key];
+      if(remote[key])checkpoint[key]=remote[key];else delete checkpoint[key];
       cache.delete(key);
     }
     const conflictsChanged=!equal(conflicts,collisions);
     conflicts=collisions;controller.conflicts=collisions;
     if(incoming.size){if(!persist())throw Error('设备存储空间不足，无法保存同步内容');notify();}
     if(conflictsChanged&&!incoming.size)notify();
-    localStorage.setItem(baseKey,JSON.stringify(base));
-    first=false;
+    localStorage.setItem(baseKey,JSON.stringify(checkpoint));
+    base=checkpoint;first=false;
     setStatus(collisions.length?'有 '+collisions.length+' 项同时修改，请选择版本':'已同步');
   }
   const controller={status:'正在同步',conflicts:[],async flush(force){

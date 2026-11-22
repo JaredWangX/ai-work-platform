@@ -19,6 +19,7 @@ const accountKey=info=>guestKey+'/'+info.space+'/'+info.person.id;
 const storageKey=account?accountKey(account):guestKey;
 let syncController,teamDirectory,preferenceRev=0;
 let syncNeedsRender=false;
+const canManageConnections=()=>!account||account.role==='admin';
 
 const pageNames = Object.fromEntries(groups.flatMap(([, links]) => links.map(([key, name]) => [key, name])));
 Object.assign(pageNames,{login:'登录',register:'注册'});
@@ -343,7 +344,9 @@ function uploadControl(label,kind='attachment',compact=false) {
 }
 const resourceLabels={models:'模型',skills:'技能',knowledge:'知识库',database:'数据库'};
 function resourceMenu() {
-  const list=picker==='models' ? [{id:'platform',name:'平台模型',description:!modelConnections.some(x=>x.active)?'当前默认':'切换为工作空间默认'},...modelConnections.map(x=>({...x,description:x.model+(x.active?' · 当前默认':'')}))] : state[picker];
+  const active=modelConnections.find(item=>item.active);
+  const modelList=[{id:'platform',name:'平台模型',description:active?'切换为工作空间默认':'当前默认'},...modelConnections.map(item=>({...item,description:item.model+(item.active?' · 当前默认':'')}))];
+  const list=picker==='models'?(canManageConnections()?modelList:modelList.filter(item=>item.id===(active?.id||'platform'))):state[picker];
   return `<section class="resource-picker" aria-label="选择对话资源"><header>
     <div class="segments" role="group" aria-label="资源类型">${Object.entries(resourceLabels).map(([key,label])=>button(label,'resource-tab',{id:key,extra:`aria-pressed="${key===picker}"`})).join('')}</div>
     ${button('','resource-close',{glyph:'x',title:'关闭资源选择'})}
@@ -824,10 +827,10 @@ function database() {
     return `<article class="panel database-connection source-card">
       <header><span class="tile-icon">${icon('database')}</span><div><h2>${escape(item.name)}</h2><p>${escape(item.description)}</p></div></header>
       <div class="schema-caption"><code>${escape(source?.table||item.table||item.database||'—')}</code><small>${fields.length?fields.length+' 个字段':'待连接'}</small></div>
-      ${structure}<footer><small>${escape(item.engine)}</small><div class="row-actions">${item.source?button('查询数据','query-db',{id:item.id,glyph:'database'}):''}${source?'':button(item.engine==='CSV'?'替换数据':item.remoteConnection?'编辑':'连接',item.engine==='CSV'?'import-csv':'edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></footer>
+      ${structure}<footer><small>${escape(item.engine)}</small><div class="row-actions">${item.source?button('查询数据','query-db',{id:item.id,glyph:'database'}):''}${source||!canManageConnections()?'':button(item.engine==='CSV'?'替换数据':item.remoteConnection?'编辑':'连接',item.engine==='CSV'?'import-csv':'edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></footer>
     </article>`;
   });
-  return `<div class="page database-page">${heading('数据库','查看数据源的字段和口径，打开查询即可核对实际记录。','<div class="row-actions">'+button('导入 CSV','import-csv',{glyph:'upload'})+button('新增连接','edit',{primary:true,glyph:'plus',extra:'data-collection="database"'})+'</div>')}
+  return `<div class="page database-page">${heading('数据库','查看数据源的字段和口径，打开查询即可核对实际记录。',canManageConnections()?'<div class="row-actions">'+button('导入 CSV','import-csv',{glyph:'upload'})+button('新增连接','edit',{primary:true,glyph:'plus',extra:'data-collection="database"'})+'</div>':'')}
     <div class="view-heading"><h2>数据源</h2><span>${cards.length} 个连接</span></div>
     <div class="sources-grid">${cards.join('')||empty('暂无连接配置')}</div>
     <p class="footnote">支持 PostgreSQL、MySQL 的只读表或视图。服务器验证 TLS 和访问权限后，对话与定时任务即可使用。</p></div>`;
@@ -934,12 +937,12 @@ function modelLabel() {
 function models() {
   const active=modelConnections.find(item=>item.active);
   const samples=['case-weekly-doc','case-weekly-sheet','case-launch-deck'].map(id=>byId('files',id)).filter(Boolean);
-  return `<div class="page models-page">${heading('模型管理','连接自己的模型，为对话、文档和后台任务选择默认服务。',button('添加模型','edit-model',{glyph:'plus',primary:true}))}
+  return `<div class="page models-page">${heading('模型管理','连接自己的模型，为对话、文档和后台任务选择默认服务。',canManageConnections()?button('添加模型','edit-model',{glyph:'plus',primary:true}):'')}
     <section class="model-connection panel"><span class="model-symbol">${icon('boxes')}</span><div><small>对话模型</small><h2>${escape(connection.available?connection.name:'实时模型')}</h2></div>
     ${badge(modelLabel(),connection.available?'success':connection.checking?'':'danger')}</section>
     <section class="panel connection-list"><div class="view-heading"><h2>模型连接</h2>${button('检测当前模型','refresh-model',{glyph:'refresh-cw',disabled:connection.checking})}</div>
-    <div class="connection-row"><div><strong>平台模型</strong><small>工作台提供的默认服务</small></div>${active?button('设为默认','activate-model',{id:'platform'}):badge('当前默认','success')}</div>
-    ${modelConnections.map(item=>`<div class="connection-row"><div><strong>${escape(item.name)}</strong><small>${escape(item.model)} · ${escape(item.endpoint)}</small></div><div class="row-actions">${item.active?badge('当前默认','success'):button('设为默认','activate-model',{id:item.id})}${button('编辑','edit-model',{id:item.id})}${button('删除','remove-model',{id:item.id})}</div></div>`).join('')}
+    <div class="connection-row"><div><strong>平台模型</strong><small>工作台提供的默认服务</small></div>${!active?badge('当前默认','success'):canManageConnections()?button('设为默认','activate-model',{id:'platform'}):''}</div>
+    ${modelConnections.map(item=>`<div class="connection-row"><div><strong>${escape(item.name)}</strong><small>${escape(item.model)} · ${escape(item.endpoint)}</small></div><div class="row-actions">${item.active?badge('当前默认','success'):canManageConnections()?button('设为默认','activate-model',{id:item.id}):''}${canManageConnections()?button('编辑','edit-model',{id:item.id})+button('删除','remove-model',{id:item.id}):''}</div></div>`).join('')}
     ${connectionCatalogError?`<p role="alert">${escape(connectionCatalogError)} ${button('重试','reload-connections')}</p>`:''}</section>
     <div class="model-paths">
       <a class="panel entry-link" href="#chat"><span class="tile-icon">${icon('messages-square')}</span><span><strong>发起对话</strong><small>引用资料，分析数据，生成可编辑文件。</small></span>${icon('arrow-up-right')}</a>
@@ -967,8 +970,8 @@ function settings() {
       <form class="edit-form" data-form="memory"><label>表达与交付偏好<textarea name="preferences" rows="4" maxlength="800">${escape(state.preferences)}</textarea></label>
       <fieldset class="preference-examples"><legend>插入常用偏好</legend>${[['结论优先','先写结论，再列出支撑结论的事实。'],['标注来源','引用数据时注明来源、单位和统计周期。'],['明确分工','列出行动项时写清负责人和交付时间。']].map(([label,text])=>button(label,'insert-preference',{glyph:'plus',id:text})).join('')}</fieldset>
       <div class="row-actions"><button class="button primary" type="submit">保存偏好</button></div></form></section>`
-    : `<section class="panel database-list tool-directory"><div class="database-header"><h2>MCP 服务器列表</h2>${button('新增','edit',{glyph:'plus',extra:'data-collection="tools"'})}</div>
-      ${state.tools.map(tool=>`<article class="database-record"><span class="tile-icon">${icon('workflow')}</span><div class="database-info"><h3>${escape(tool.name)}</h3><p>${escape(tool.description)}</p><code>${escape(tool.url)}</code></div>${tool.remoteConnection?button('打开服务','open-mcp',{id:tool.id}):''}${button(tool.remoteConnection?'编辑':'连接','edit',{id:tool.id,extra:'data-collection="tools"'})}${button('删除','delete',{id:tool.id,extra:'data-collection="tools"'})}</article>`).join('')||empty('暂无工具配置')}</section><p class="footnote">连接自己的 MCP 服务后，可读取资源，并在确认参数后运行工具。</p>`}</div>`;
+    : `<section class="panel database-list tool-directory"><div class="database-header"><h2>MCP 服务器列表</h2>${canManageConnections()?button('新增','edit',{glyph:'plus',extra:'data-collection="tools"'}):''}</div>
+      ${state.tools.map(tool=>`<article class="database-record"><span class="tile-icon">${icon('workflow')}</span><div class="database-info"><h3>${escape(tool.name)}</h3><p>${escape(tool.description)}</p><code>${escape(tool.url)}</code></div>${tool.remoteConnection?button('打开服务','open-mcp',{id:tool.id}):''}${canManageConnections()?button(tool.remoteConnection?'编辑':'连接','edit',{id:tool.id,extra:'data-collection="tools"'})+button('删除','delete',{id:tool.id,extra:'data-collection="tools"'}):''}</article>`).join('')||empty('暂无工具配置')}</section><p class="footnote">连接自己的 MCP 服务后，可读取资源，并在确认参数后运行工具。</p>`}</div>`;
 }
 function systemSettings() {
   return `<div class="page system-page">${heading('系统设置','配置工作空间名称、应用标识和浏览器图标。')}
@@ -977,7 +980,7 @@ function systemSettings() {
       <label>工作空间名称<input name="name" maxlength="35" required value="${escape(state.profile.name)}"></label></div>
     <div class="brand-uploads">${[['logo','应用 Logo'],['icon','浏览器图标']].map(([id,label])=>`<label>${label}<span class="brand-image-sample"><img data-current-image="${id}" src="${escape(brandImage(id))}" alt=""></span><input type="file" name="${id}" accept="image/png,image/jpeg,image/webp"></label>`).join('')}</div>
     <small>支持 PNG、JPG 或 WebP，每张图片最多 200 KB。</small>
-    <div class="row-actions">${button('恢复示例数据','reset')}<button class="button primary" type="submit">保存设置</button></div>
+    <div class="row-actions">${account?'':button('恢复示例数据','reset')}<button class="button primary" type="submit">保存设置</button></div>
     </form></section>
     <aside class="panel brand-preview"><div class="view-heading"><h2>外观预览</h2></div>
       <figure><figcaption>浏览器标签</figcaption><div class="tab-preview"><img data-brand-preview="icon" src="${escape(brandImage('icon'))}" alt=""><span data-brand-preview="brandName">工作台 · ${escape(brandName())}</span></div></figure>
@@ -1683,7 +1686,7 @@ document.addEventListener('click',async event=>{
       picker=id;render({bottom:false});document.querySelector('.resource-picker input').focus();break;
     case 'resource-close': picker='';render({bottom:false});break;
     case 'resource-pick': {
-      if(picker==='models'){
+      if(picker==='models'&&canManageConnections()&&id!==(modelConnections.find(item=>item.active)?.id||'platform')){
         try{await activateModel(id);}catch(error){toast(error.message);break;}
       }
       if (picker==='skills') selectedSkill=id;
@@ -2088,6 +2091,7 @@ window.addEventListener('hashchange',()=>{
   if(key==='users'&&account)refreshTeam().catch(e=>toast(e.message));
 });
 window.addEventListener('resize',paintCharts);
+window.addEventListener('online',()=>{if(account&&!syncController)location.reload();});
 async function boot(){
   if(account){
     try{
@@ -2139,8 +2143,6 @@ async function refreshSchedule(){
   }catch(error){if(page==='tasks' && !dialog.open){const note=document.querySelector('.tasks-page .footnote');if(note)note.textContent='暂时无法刷新服务器执行记录。';}}
   finally{refreshingSchedule=false;}
 }
-window.addEventListener('storage',event=>{if(event.key==='workspace-account-session')location.reload();});
-document.addEventListener('focusout',()=>{if(syncNeedsRender)setTimeout(()=>{if(!dialog.open&&!loading.size&&!document.activeElement?.matches('input,textarea,select')){syncNeedsRender=false;render({bottom:false});}},0);});
 window.addEventListener('hashchange',refreshSchedule);
 document.addEventListener('visibilitychange',refreshSchedule);
 setInterval(refreshSchedule,15000);
