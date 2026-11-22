@@ -1,3 +1,5 @@
+import './auth-story.mjs';
+import './composer-glass.mjs';
 import {teamSync} from './team-sync.mjs';
 import {apiUrl} from './api.mjs';
 import {databases,workspaceAPI,workspaceToken} from './workspace-client.mjs';
@@ -112,7 +114,9 @@ let graphNeighborhood = false;
 let historyOpen = !compactChat();
 let spaceOpen = false;
 let mobileMenu = false;
-let navCollapsed = false;
+let navCollapsed = localStorage.getItem('workspace-nav-collapsed')==='true';
+let accountTab='users';
+let mobileStory=false;
 let themeMenu = false;
 let commandLanguage = 'zh';
 let commandIndex = 27;
@@ -215,7 +219,7 @@ const brandName = () => state.profile.brandName || 'AI 工作平台';
 const brandImage = kind => {
   const value=state.profile[kind];
   return typeof value==='string' && /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(value)
-    ? value : kind==='logo'?'assets/logo.png':'assets/favicon.png';
+    ? value : kind==='logo'?'assets/wordmark-blue.png':'assets/brand-mark.png';
 };
 function beijingTime(value, full = false, seconds = false) {
   if (!value) return '';
@@ -250,6 +254,7 @@ function dashboard() {
     ${heading('你好，'+state.profile.name,'发起一项新工作，或继续处理最近的任务。',link('查看团队文件','files','folder-open'))}
     <div class="home-grid"><div class="home-main">
       <section class="panel home-compose" aria-label="发起一项工作">
+        <button type="button" class="home-suggestion" data-action="use-command" aria-label="将当前示例填入输入框">${icon('wand-sparkles')}<span class="welcome-command" data-welcome-command><span>${escape(commandExamples[commandIndex][commandLanguage])}</span><i aria-hidden="true"></i></span>${icon('arrow-up-right')}</button>
         <form data-form="home">
           <label class="sr-only" for="home-input">输入你的需求</label>
           <textarea id="home-input" name="prompt" required maxlength="4000" placeholder="把需要完成的工作告诉 AI 工作平台…"></textarea>
@@ -258,7 +263,7 @@ function dashboard() {
           ${picker ? resourceMenu() : ''}
         </form>
       </section>
-      <div class="subhead case-heading"><div class="home-views" role="group" aria-label="选择工作列表">${[['cases','参考案例'],['recent','最近的工作']].map(([id,label])=>button(label,'home-tab',{id,extra:`aria-pressed="${homeTab===id}"`})).join('')}</div>${link('会话历史','chat')}</div>
+      <div class="subhead case-heading"><div class="home-views" role="group" aria-label="选择工作列表">${[['cases','参考案例'],['recent','最近的工作']].map(([id,label])=>button(label,'home-tab',{id,extra:`aria-pressed="${homeTab===id}"`})).join('')}</div>${button('会话历史','show-history',{glyph:'list'})}</div>
       ${homeTab==='cases'?`<section class="case-library" aria-label="参考案例">${featuredCases.map(example=>dossierCard(example)).join('')}</section>`:`
       <div class="panel rows">${recent.map(item => `<button class="list-link recent-work" data-action="open-chat" data-id="${item.id}">${icon('messages-square')}<strong>${escape(item.title)}</strong><span>${escape(chatFiles(item)[0]?.name || '')}</span><time>${beijingTime(item.updated)}</time></button>`).join('') || empty('暂无对话')}</div>`}
       <div class="subhead"><h2>我的 AI 员工</h2>${link('查看全部 '+state.staff.length+' 位','staff')}</div>
@@ -753,7 +758,7 @@ const marketRecipes={
   sheet:{output:'问题行与复核清单',example:'检查这份表格，逐行标出缺失字段、重复记录和格式不一致的值。'},
   format:{output:'分级标题与交付清单',example:'整理这份报告的标题层级，把需要跟进的事项汇总为清单。'},
 };
-const staffGlyph=id=>icon(({s1:'chart-no-axes-combined',s2:'search',s3:'file-text'})[id]||'bot');
+const staffGlyph=id=>({s1:'📊',s2:'🔎',s3:'📝'})[id]||icon('bot');
 function cardExcerpt(label,text) {
   return `<div class="card-excerpt"><small>${escape(label)}</small><p>${escape(text)}</p></div>`;
 }
@@ -814,7 +819,7 @@ function teams() {
     <div class="team-layout"><aside>${state.teams.map(item=>`<button class="team-select panel" type="button" data-action="select-team" data-id="${item.id}" aria-pressed="${item.id===team?.id}"><strong>${escape(item.name)}</strong><small>${(item.members||[]).filter(id=>byId('staff',id)).length} 位成员 · ${escape(item.specialty)}</small></button>`).join('')||empty('暂无团队')}</aside>
     <section class="panel team-detail">${team?`<div class="side-title"><h2>${escape(team.name)}</h2>${button('管理成员','edit',{id:team.id,extra:'data-collection="teams"'})}</div><p>${escape(team.description)}</p>
       <div class="subhead team-subhead"><h3>团队分工</h3><small>${members.length} 位成员</small></div>
-      <div class="team-members">${members.map(person=>`<button type="button" data-action="staff-detail" data-id="${escape(person.id)}"><span class="tile-icon">${icon('bot')}</span><strong>${escape(person.name)}</strong><small>${escape(person.specialty||'通用')}</small><p>${escape(person.description)}</p></button>`).join('')||empty('请选择团队成员')}</div>
+      <div class="team-members">${members.map(person=>`<button type="button" data-action="staff-detail" data-id="${escape(person.id)}"><span class="tile-icon" aria-hidden="true">${staffGlyph(person.id)}</span><strong>${escape(person.name)}</strong><small>${escape(person.specialty||'通用')}</small><p>${escape(person.description)}</p></button>`).join('')||empty('请选择团队成员')}</div>
       ${file?`<div class="team-output"><h3>协作产物</h3><p>${escape(file.hint||'可打开并继续补充。')}</p>${fileButton(file)}</div>`:''}`:empty('创建团队后配置成员。')}</section></div></div>`;
 }
 function database() {
@@ -953,7 +958,16 @@ function models() {
 }
 function users() {
   if(account)return teamPage();
-  return `<div class="page">${heading('团队成员','登录后可邀请同事，共享文件、知识笔记、会话和工作资源。')}${accountPanel()}</div>`;
+  const invites=state.invites;
+  return `<div class="page">${heading('用户管理','查看团队样例；用自己的账号创建或加入团队。',accountTab==='users'
+    ?button('添加示例成员','edit',{primary:true,glyph:'plus',extra:'data-collection="users"'})
+    :button('生成演示码','create-invite',{primary:true,glyph:'plus'}))}
+    ${accountPanel()}<div class="page-tabs" role="group" aria-label="用户管理视图">${[['users','用户'],['invites','邀请码']].map(([id,label])=>button(label,'account-tab',{id,extra:`aria-pressed="${accountTab===id}"`})).join('')}</div>
+    ${accountTab==='users'?`<section class="panel table"><div class="database-header"><h2>用户 · ${state.users.length} 人</h2></div>
+    <table class="responsive-table"><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${state.users.map(user=>`<tr><td data-label="用户名"><strong>${escape(user.description)}</strong><small>${escape(user.name)}</small></td><td data-label="角色">${badge(user.specialty)}</td><td data-label="状态">${badge('正常','success')}</td><td data-label="操作"><div class="row-actions">${button('编辑','edit',{id:user.id,extra:'data-collection="users"'})}${button('删除','delete',{id:user.id,extra:'data-collection="users"'})}</div></td></tr>`).join('')}</tbody></table></section>`:
+    `<section class="panel database-list"><div class="database-header"><h2>演示邀请码</h2><small>共 ${invites.length} 个</small></div>
+      ${invites.map(invite=>`<article class="database-record"><div class="database-info"><h3><code>${escape(invite.code)}</code></h3><p>${escape(invite.note)}</p></div>${badge(invite.status,invite.status==='未使用'?'success':'')}${invite.status==='未使用'?button('停用','disable-invite',{id:invite.id}):''}</article>`).join('')||empty('暂无邀请码记录')}</section>`}
+    <p class="footnote">成员和邀请码是演示记录，保存在当前浏览器。</p></div>`;
 }
 async function savePreferences(text,enabled){
   if(account){
@@ -996,16 +1010,37 @@ function authPreview(register) {
   const channelRows=(sheet?.rows||[]).filter(row=>row[0]!=='合计'&&typeof row[2]==='number');
   const largest=Math.max(1,...channelRows.map(row=>row[2]));
   const channelNames={'官网':'Website','平台旗舰店':'Flagship store','分销':'Distribution'};
-  return `<main class="auth-preview" id="workspace"><section class="auth-story">
+  const monthly=examples.find(x=>x.id==='sales').reply.chart;
+  const points=monthly.map(([,value],i)=>[36+i*64,100-value]);
+  const path=points.slice(1).reduce((d,[x,y],i)=>{
+    const [lastX,lastY]=points[i],mid=(lastX+x)/2;
+    return d+' C'+mid+' '+lastY+' '+mid+' '+y+' '+x+' '+y;
+  },'M'+points[0].join(' '));
+  const filesForScene=ids=>ids.map(id=>byId('files',id)).filter(Boolean).map(fileButton).join('');
+  return `<main class="auth-preview" id="workspace"><section class="auth-story${mobileStory?' story-expanded':''}">
     <a class="auth-logo" href="#home"><img src="${escape(brandImage('logo'))}" alt="${escape(brandName())}"></a>
-    <div class="auth-copy"><p>${t('对话 · 协作 · 自动化','Chat · Collaboration · Automation')}</p><h1>${t('团队的 AI 工作空间','An AI workspace for teams')}</h1>
+    <button type="button" class="story-mobile-toggle button" aria-controls="auth-demo" aria-expanded="${mobileStory}" data-action="show-story">${icon('play')}${t('业务演示','Demo')}</button>
+    <div class="auth-copy" id="auth-demo"><p>${t('对话 · 协作 · 自动化','Chat · Collaboration · Automation')}</p><h1>${t('团队的 AI 工作空间','An AI workspace for teams')}</h1>
       <div>${t('让 AI 整理资料、分析数据、生成文档。','Organize research, analyze data and draft documents.')}</div><div>${t('任务、讨论和交付文件，在同一处继续。','Keep tasks, discussions and deliverables together.')}</div>
-      <article class="panel auth-report"><header><strong>${icon('messages-square')}${t('经营数据周报','Weekly operations report')}</strong>${badge(t('已完成','Completed'),'success')}</header>
+      <business-story class="business-story"><div class="story-nav" role="group" aria-label="${t('选择业务演示','Select a demo')}">
+        ${[['file-text','经营周报','Reports'],['chart-no-axes-combined','销售分析','Sales'],['workflow','发布协作','Launch']].map(([glyph,zh,en],i)=>`<button type="button" data-scene="${i}" aria-pressed="${i===0}">${icon(glyph)}${t(zh,en)}</button>`).join('')}
+        <button type="button" data-play-story data-play="${t('继续播放','Resume demo')}" data-pause="${t('暂停播放','Pause demo')}"><span data-playing aria-hidden="true">Ⅱ</span><span data-paused hidden>${icon('play')}</span></button></div>
+      <div class="story-stage"><article class="panel auth-report" data-story-slide><header><strong>${icon('messages-square')}${t('经营数据周报','Weekly operations report')}</strong><span data-reveal="2">${badge(t('已完成','Completed'),'success')}</span></header>
        <blockquote>${t('整理本周经营情况，','Summarize this week’s operations,')}<br>${t('列出需要跟进的问题。','and flag issues that need follow-up.')}</blockquote>
-       <p>${t('周报与渠道明细已整理。退款问题已列入待跟进事项，可继续追问核对顺序。','The report and channel breakdown are ready. Ask a follow-up about checking refunds.')}</p>
-       ${channelRows.length?`<figure class="auth-channel-chart"><figcaption>${t('本周渠道销售额 · 万元','Weekly channel sales · CNY 10k')}</figcaption>${channelRows.map(([label,,value])=>`<div><span>${escape(en?(channelNames[label]||label):label)}</span><progress aria-hidden="true" max="${largest}" value="${Math.max(0,value)}"></progress><strong>${escape(value.toFixed(1))}</strong></div>`).join('')}</figure>`:''}
-       <div>${['case-weekly-doc','case-weekly-sheet'].map(id=>byId('files',id)).filter(Boolean).map(fileButton).join('')}</div>
-      </article><div class="auth-capabilities">${[['book-open','团队资料','Team knowledge'],['bot','AI 员工','AI teammates'],['clock','定时任务','Scheduled tasks']].map(([glyph,zh,eng])=>`<span>${icon(glyph)}${t(zh,eng)}</span>`).join('')}</div>
+       <p data-reveal="2">${t('周报与渠道明细已整理。退款问题已列入待跟进事项，可继续追问核对顺序。','The report and channel breakdown are ready. Ask a follow-up about checking refunds.')}</p>
+       ${channelRows.length?`<figure class="auth-channel-chart" data-reveal="1"><figcaption>${t('本周渠道销售额 · 万元','Weekly channel sales · CNY 10k')}</figcaption>${channelRows.map(([label,,value])=>`<div><span>${escape(en?(channelNames[label]||label):label)}</span><progress aria-hidden="true" max="${largest}" value="${Math.max(0,value)}"></progress><strong>${escape(value.toFixed(1))}</strong></div>`).join('')}</figure>`:''}
+       <div data-reveal="2">${filesForScene(['case-weekly-doc','case-weekly-sheet'])}</div>
+      </article>
+      <article hidden class="panel auth-report" data-story-slide><header><strong>${icon('chart-no-axes-combined')}${t('上半年销售分析','First-half sales')}</strong><span data-reveal="2">${badge(t('核对完成','Verified'),'success')}</span></header>
+        <blockquote>${t('比较每月销售额，找出增长最快的月份。','Compare monthly sales and identify the largest increase.')}</blockquote>
+        <figure class="demo-trend"><figcaption>${t('销售额 · 万元','Sales · CNY 10k')}</figcaption>
+        <svg viewBox="0 0 382 128" role="img" aria-label="${escape(monthly.map(([m,v])=>m+' '+v).join('，'))}">
+          ${[20,50,80].map(v=>`<line x1="32" x2="362" y1="${100-v}" y2="${100-v}"/><text x="2" y="${104-v}">${v}</text>`).join('')}
+          <g data-reveal="1"><path d="${path}" pathLength="1"/></g>${points.map(([x,y],i)=>`<circle cx="${x}" cy="${y}" r="3" data-reveal="1"/><text x="${x}" y="118" text-anchor="middle">${en?['Jan','Feb','Mar','Apr','May','Jun'][i]:monthly[i][0]}</text>`).join('')}</svg></figure>
+        <p data-reveal="2">${t('4 月销售额从 45 万元升至 62 万元，环比增长 37.8%。','April sales rose 37.8%, from CNY 450,000 to 620,000.')}</p><div data-reveal="2">${filesForScene(['case-sales'])}</div></article>
+      <article hidden class="panel auth-report" data-story-slide><header><strong>${icon('workflow')}${t('新品发布协作','Product launch handoff')}</strong><span data-reveal="2">${badge(t('待验收','For review'))}</span></header>
+        <blockquote>${t('把发布需求拆成排期，交给渠道同事验收。','Turn the launch brief into a schedule and a channel checklist.')}</blockquote>
+        <ol class="demo-handoff">${[['book-open','读取需求笔记','Read the brief','逐项核对定价、规格和下载入口。','Check pricing, specifications and downloads.'],['calendar-days','梳理发布排期','Schedule the launch','按预热、发布和跟进分配负责人。','Assign owners to pre-launch, release and follow-up.'],['clipboard-list','交付验收清单','Deliver the checklist','客服复核下载失败时的替代入口。','Support verifies the alternative download link.']].map(([glyph,zh,enTitle,desc,eng],i)=>`<li data-reveal="${i}">${icon(glyph)}<div><strong>${t(zh,enTitle)}</strong><small>${t(desc,eng)}</small></div></li>`).join('')}</ol><div data-reveal="2">${filesForScene(['case-launch-deck','case-launch-checks'])}</div></article></div></business-story><div class="auth-capabilities">${[['book-open','团队资料','Team knowledge'],['bot','AI 员工','AI teammates'],['clock','定时任务','Scheduled tasks']].map(([glyph,zh,eng])=>`<span>${icon(glyph)}${t(zh,eng)}</span>`).join('')}</div>
     </div></section><section class="auth-form-side">
       <div class="auth-tools">${button(t('EN','中文'),'command-language',{extra:'aria-label="切换预览语言"'})}${themeControl()}</div>
       <div class="auth-form"><nav aria-label="${t('账号界面','Account screens')}"><a href="#login" aria-current="${register?'false':'page'}">${t('登录','Sign in')}</a><a href="#register" aria-current="${register?'page':'false'}">${t('注册','Register')}</a></nav>
@@ -1020,10 +1055,42 @@ function authPreview(register) {
       </div></section></main>`;
 }
 const views = {home:dashboard,chat:chatView,projects,tasks,knowledge,files,database,models,settings,system:systemSettings,teams,users};
-function render({keepDraft = true, bottom = true} = {}) {
+function filterRows(input){
+  const target=document.querySelector(input.dataset.filter);
+  if(!target)return;
+  const term=input.value.trim().toLowerCase();
+  for(const row of target.querySelectorAll('[data-search]'))row.hidden=!row.dataset.search.toLowerCase().includes(term);
+  if(target.id==='notes'&&term)document.querySelector('.note-index').open=true;
+  if(target.id==='collection-list')document.querySelector('.search-empty').hidden=!term||!!target.querySelector('[data-search]:not([hidden])');
+}
+// Keep in-progress native controls across a repaint. Passwords and file selections live only in this DOM.
+function restoreInputsAfterPaint(){
+  const root=document.querySelector('#workspace');
+  if(!root)return ()=>{};
+  const edits=[];
+  const active=document.activeElement;
+  for(const field of root.querySelectorAll('input[data-filter], .auth-real-form input, [data-form="system"] input, [data-form="memory"] textarea')){
+    if(field.value===field.defaultValue&&field!==active)continue;
+    const form=field.form?.dataset.form;
+    const selector=field.dataset.filter?'input[data-filter="'+CSS.escape(field.dataset.filter)+'"]':'[data-form="'+CSS.escape(form)+'"] [name="'+CSS.escape(field.name)+'"]';
+    edits.push({field,selector,focused:active===field});
+  }
+  return ()=>{
+    for(const {field,selector,focused} of edits){
+      const current=app.querySelector(selector);
+      if(!current)continue;
+      if(field.type==='file'){current.replaceWith(field);if(field.files?.length)void previewBrandAsset(field);}
+      else{
+        current.value=field.value;
+        if(current.dataset.filter)filterRows(current);
+        if(focused){current.focus({preventScroll:true});if(field.selectionStart!=null)current.setSelectionRange(field.selectionStart,field.selectionEnd);}
+      }
+    }
+  };
+}
+function render({keepDraft = true, bottom = true,preserveInputs=true} = {}) {
   const draft = keepDraft ? document.querySelector('#message, #home-input') : null;
   const draftFocused = draft === document.activeElement;
-  const previousPage = page;
   const oldRoute=page+'/'+routeDetail;
   if (draft) { if(draft.value) drafts.set(oldRoute,draft.value); else drafts.delete(oldRoute); }
   const scrollTop = document.querySelector('#workspace')?.scrollTop || 0;
@@ -1036,24 +1103,31 @@ function render({keepDraft = true, bottom = true} = {}) {
   const route=page+'/'+routeDetail;
   if (page==='chat') activeChat=routeDetail?byId('chats',routeDetail)?.id:undefined;
   const sameRoute=oldRoute===route;
+  const restoreInputs=sameRoute&&preserveInputs?restoreInputsAfterPaint():()=>{};
   if (!sameRoute && page==='chat') showConversationStart=Boolean(byId('chats',activeChat)?.example);
   if (!sameRoute && dialog.open) dialog.close();
   document.documentElement.dataset.theme = state.profile.theme;
   document.title = pageNames[page] + ' · ' + brandName();
   document.querySelector('link[rel=icon]').href=brandImage('icon');
   if(page==='login'||page==='register'){
-    app.innerHTML=authPreview(page==='register');startWelcomeCommand();return;
+    const pending=sameRoute?app.querySelector('.auth-real-form:has([type=submit]:disabled)'):null;
+    app.innerHTML=authPreview(page==='register');
+    if(pending)app.querySelector('.auth-real-form').replaceWith(pending);
+    else restoreInputs();
+    startWelcomeCommand();return;
   }
   const view = views[page] || (() => collection(page));
   app.innerHTML = `<div class="shell${navCollapsed?' nav-collapsed':''}">${nav()}${mobileMenu ? '<button class="mobile-scrim" aria-label="关闭导航" data-action="menu"></button>' : ''}
     <header class="topbar"><div class="topbar-left">${button('','menu',{glyph:'menu',title:'切换导航',extra:`aria-expanded="${mobileMenu}" aria-controls="navigation"`})}
       ${navCollapsed?button('','fold-nav',{glyph:'panel-left',title:'展开主导航'}):''}
-      ${page==='chat'?`<a href="#home" class="mobile-logo"><img src="${escape(brandImage('logo'))}" alt="${escape(brandName())}"></a>`:''}<strong>${pageNames[page]}</strong></div>
+      <a href="#home" class="mobile-logo ${page==='chat'?'mobile-wordmark':'mobile-mark'}" aria-label="${escape(brandName())} 工作台"><img src="${escape(brandImage(page==='chat'?'logo':'icon'))}" alt=""></a><strong>${pageNames[page]}</strong></div>
     <div class="topbar-right">${account?button(account.person.display,'account-options'):link('登录','login')}${page==='chat'?'<span class="current-theme">'+(state.profile.theme==='dark'?'深色主题':'浅色主题')+'</span>':themeControl(true)}
       ${page==='chat'?button(commandLanguage==='zh'?'中文':'EN','command-language',{extra:'aria-label="切换指令示例语言"'}):'<span class="workspace-language">中文</span>'}</div></header>
     <main id="workspace" tabindex="-1" class="workspace">${view()}</main></div>`;
+  restoreInputs();
+  if(!sameRoute)document.querySelector('#workspace').classList.add('workspace-enter');
   document.querySelector('.navigation').scrollTop = navScroll;
-  if (page === previousPage) document.querySelector('#workspace').scrollTop = scrollTop;
+  if (sameRoute) document.querySelector('#workspace').scrollTop = scrollTop;
   const nextInput=document.querySelector('#message,#home-input');
   if (nextInput) {
     nextInput.value=drafts.get(route)||'';
@@ -1528,7 +1602,7 @@ async function saveSystemSettings(values) {
   }
   state.profile=next;
   if(!save()){state.profile=previous;return;}
-  render();toast('设置已保存');
+  render({preserveInputs:false});toast('设置已保存');
 }
 function validBrandAsset(file) {
   return ['image/png','image/jpeg','image/webp'].includes(file.type)&&file.size<=200_000;
@@ -1589,7 +1663,11 @@ async function upload(file, target, forChat) {
 
 document.addEventListener('click',async event=>{
   if(event.target.closest('.skip-link')) {event.preventDefault();document.querySelector('#workspace')?.focus();return;}
-  if(event.target.closest('.sidebar a')) mobileMenu=false;
+  const navLink=event.target.closest('.sidebar a');
+  if(navLink&&mobileMenu){
+    mobileMenu=false;
+    if(navLink.hash===location.hash){event.preventDefault();render({bottom:false});app.querySelector('[data-action=menu]')?.focus();return;}
+  }
   if (themeMenu && !event.target.closest('.theme-control')) {
     themeMenu=false;
     document.querySelector('.theme-options')?.remove();
@@ -1604,8 +1682,15 @@ document.addEventListener('click',async event=>{
   if(!control) return;
   const {action,id,collection:key} = control.dataset;
   switch(action) {
-    case 'menu': mobileMenu=!mobileMenu;render();break;
-    case 'fold-nav': navCollapsed=!navCollapsed;render({bottom:false});break;
+    case 'menu':
+      mobileMenu=!mobileMenu;render({bottom:false});
+      (mobileMenu?app.querySelector('.navigation [aria-current=page]')||app.querySelector('.navigation a'):app.querySelector('.topbar [data-action=menu]'))?.focus();break;
+    case 'show-story': {
+      mobileStory=!mobileStory;
+      const section=control.closest('.auth-story');section.classList.toggle('story-expanded',mobileStory);control.setAttribute('aria-expanded',String(mobileStory));
+      section.querySelector('business-story').listen();break;
+    }
+    case 'fold-nav': navCollapsed=!navCollapsed;localStorage.setItem('workspace-nav-collapsed',String(navCollapsed));render({bottom:false});app.querySelector('.brand-row [data-action=fold-nav]:not(:where(.nav-collapsed *)),.topbar-left [data-action=fold-nav]')?.focus();break;
     case 'theme-menu':
       themeMenu=!themeMenu;render({bottom:false});
       if (themeMenu) document.querySelector('.theme-options [aria-pressed=true]')?.focus();
@@ -1613,6 +1698,8 @@ document.addEventListener('click',async event=>{
     case 'theme-set':
       themeMenu=false;state.profile.theme=id;save();render({bottom:false});document.querySelector('.theme-trigger')?.focus();break;
     case 'command-language': commandLanguage=commandLanguage==='zh'?'en':'zh';render({bottom:false});break;
+    case 'show-history':
+      historyOpen=true;spaceOpen=false;go('chat');break;
     case 'history':
       historyOpen=!historyOpen;
       if(historyOpen&&innerWidth<1540)spaceOpen=false;
@@ -1655,6 +1742,15 @@ document.addEventListener('click',async event=>{
       modal('对话设置',`<div class="detail-block"><h3>当前模型</h3><p>${escape(connection.name||modelLabel())}</p></div>
       <footer class="dialog-footer">${link('打开个人设置','settings','settings')}${button('完成','close',{primary:true})}</footer>`);break;
     case 'prompt': await send(id);break;
+    case 'use-command': {
+      const field=document.querySelector('#home-input');
+      const example=commandExamples[commandIndex][commandLanguage];
+      const prefix=field.value.slice(0,field.selectionStart);
+      const insert=(prefix&&!/\s$/.test(prefix)?' ':'')+example;
+      if(field.value.length-field.selectionEnd+field.selectionStart+insert.length>field.maxLength){toast('输入已达到长度上限');return;}
+      field.setRangeText(insert,field.selectionStart,field.selectionEnd,'end');
+      field.focus();break;
+    }
     case 'home-tab': homeTab=id;render({bottom:false});break;
     case 'start-replay': openReplay(caseFilter);break;
     case 'replay-step': replay.step=Number(id);replay.playing=false;paintReplay();break;
@@ -1764,6 +1860,11 @@ document.addEventListener('click',async event=>{
       modal(item.name,'<form class="edit-form" data-form="db-query" data-source="'+item.source+'"><p>'+escape(db.schema)+'</p><label>只读 SQL<textarea name="sql" rows="4" maxlength="1800" required>'+escape(db.sql)+'</textarea></label><button class="button primary" type="submit">运行查询</button><output aria-live="polite"></output></form>',true);
       dialog.querySelector('form').requestSubmit();break;
     }
+    case 'create-invite':
+      modal('生成演示邀请码',`<form class="edit-form" data-form="invite"><label>用途备注<input name="note" maxlength="120" required></label><p>演示码保存在当前浏览器。登录后可以邀请真实成员。</p><div class="dialog-footer">${button('取消','close')}<button class="button primary" type="submit">生成</button></div></form>`);
+      break;
+    case 'disable-invite': byId('invites',id).status='已停用';save();render();break;
+    case 'account-tab': accountTab=id;render();break;
     case 'personal-tab': personalTab=id;render();break;
     case 'memory-toggle': await savePreferences(state.preferences,!state.memoryEnabled);break;
 
@@ -2030,17 +2131,11 @@ document.addEventListener('input',event=>{
     spaceSearch=target.value;
     document.querySelector('#space-results').innerHTML=spaceResults(byId('chats',activeChat));
   }
-  if(target.id==='message'&&!event.isComposing){
+  if(['message','home-input'].includes(target.id)&&!event.isComposing){
     const head=target.value.slice(0,target.selectionStart);
     if(!picker&&/(?:^|\s)@$/.test(head)){picker='skills';render({bottom:false});document.querySelector('.resource-picker input')?.focus();}
   }
-  const query=event.target.dataset.filter;
-  if(query) document.querySelectorAll(query+' [data-search]').forEach(row=>{
-    row.hidden=!row.dataset.search.toLowerCase().includes(event.target.value.trim().toLowerCase());
-  });
-  if(query==='#collection-list'){
-    document.querySelector('.search-empty').hidden=!target.value.trim()||!!document.querySelector('#collection-list [data-search]:not([hidden])');
-  }
+  if(target.dataset.filter)filterRows(target);
 });
 document.addEventListener('change',event=>{
   const target=event.target;
@@ -2064,6 +2159,7 @@ document.addEventListener('change',event=>{
   if((target.dataset.upload||target.id==='file-upload')&&target.files[0])void upload(target.files[0],target.dataset.upload,activeChat).catch(()=>toast('文件读取失败，请重试。'));
 });
 document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&mobileMenu&&!dialog.open){mobileMenu=false;render({bottom:false});app.querySelector('.topbar [data-action=menu]')?.focus();return;}
   if(event.key==='Escape'&&(themeMenu||spaceMenu)&&!dialog.open){
     const selector=themeMenu?'.theme-trigger':`[data-testid="${spaceMenu}-filter"]`;
     themeMenu=false;spaceMenu='';render({bottom:false});document.querySelector(selector)?.focus();return;
@@ -2086,7 +2182,7 @@ document.addEventListener('focusout',()=>{if(syncNeedsRender)setTimeout(()=>{if(
 window.addEventListener('hashchange',()=>{
   picker='';themeMenu=false;spaceMenu='';
   const [key,detail='']=location.hash.slice(1).split('/');
-  if ((key||'home')!==page || detail!==routeDetail) render();
+  if ((key||'home')!==page || detail!==routeDetail){mobileMenu=false;render();}
   if(key==='tasks')void refreshSchedule();
   if(key==='users'&&account)refreshTeam().catch(e=>toast(e.message));
 });
@@ -2094,8 +2190,10 @@ window.addEventListener('resize',paintCharts);
 window.addEventListener('online',()=>{if(account&&!syncController)location.reload();});
 async function boot(){
   if(account){
+    app.innerHTML=`<main class="workspace-boot" role="status"><img src="${escape(brandImage('logo'))}" alt="${escape(brandName())}"><p>正在同步工作空间…</p></main>`;
     try{
       account=await workspaceAPI('account');if(!account.signedIn)throw Error('请登录');
+      if(localStorage.getItem(storageKey+'/sync-index'))render({bottom:false});
       const pref=await workspaceAPI('getPrefs');preferenceRev=pref.rev;
       if(pref.value){state.preferences=pref.value.preferences;state.memoryEnabled=pref.value.enabled;}
       syncController=teamSync({scope:storageKey,read:()=>state,persist:()=>{try{localStorage.setItem(storageKey,JSON.stringify(state));return true;}catch{return false;}},

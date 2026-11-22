@@ -27,12 +27,13 @@ export async function refreshWorkspaceMotion({route,homeTab,caseFilter,libraryLa
   const key=route+'/'+area+'/'+stateKey;
   const old=lastView;
   const tick=++sequence;
-  lastView=key;
   context?.revert();
   context=undefined;
-  if (!host || old===key || preference.matches) return;
+  if(!host||preference.matches){lastView='';return;}
+  if(old===key)return;
   const gsap=await loadMotion();
   if (!gsap || preference.matches || tick!==sequence || !host.isConnected) return;
+  lastView=key;
   const entering=!old.startsWith(route+'/'+area+'/');
   context=gsap.context(()=>{
     const reveal=(selector,vars={})=>{
