@@ -15,7 +15,6 @@ const storageKey = 'workspace-workspace-v1';
 const pageNames = Object.fromEntries(groups.flatMap(([, links]) => links.map(([key, name]) => [key, name])));
 Object.assign(pageNames,{login:'登录',register:'注册'});
 const statusNames = ['待开始','进行中','已完成'];
-const staffBriefs = {s1:'整理经营周报，核对渠道数据。',s2:'查找行业资料，归类待核实事项。',s3:'整理方案、分工表与交付文档。'};
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => (
   {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]
 ));
@@ -248,7 +247,7 @@ function dashboard() {
       ${homeTab==='cases'?`<section class="case-library" aria-label="参考案例">${featuredCases.map(example=>dossierCard(example)).join('')}</section>`:`
       <div class="panel rows">${recent.map(item => `<button class="list-link recent-work" data-action="open-chat" data-id="${item.id}">${icon('messages-square')}<strong>${escape(item.title)}</strong><span>${escape(chatFiles(item)[0]?.name || '')}</span><time>${beijingTime(item.updated)}</time></button>`).join('') || empty('暂无对话')}</div>`}
       <div class="subhead"><h2>我的 AI 员工</h2>${link('查看全部 '+state.staff.length+' 位','staff')}</div>
-      <div class="staff-grid">${state.staff.slice(0,3).map((person,index) => `<article class="panel staff-card"><span class="staff-symbol" aria-hidden="true">${['📊','🔎','📝'][index]}</span><h3>${escape(person.name)}</h3><p>${escape(staffBriefs[person.id]||person.description)}</p>
+      <div class="staff-grid">${state.staff.slice(0,3).map((person,index) => `<article class="panel staff-card"><span class="staff-symbol" aria-hidden="true">${['📊','🔎','📝'][index]}</span><h3><button class="card-name" data-action="staff-detail" data-id="${escape(person.id)}" title="${escape(person.name)}">${escape(person.name)}</button></h3><p>${escape(person.description)}</p>
          ${button('发起对话 →','staff-chat',{id:person.id})}</article>`).join('') || empty('暂无 AI 员工')}</div>
 
     </div><aside class="home-side">
@@ -309,8 +308,11 @@ function paintCharts() {
     });
   });
 }
+function fileFormat(file) {
+  return file.name.match(/\.([a-z0-9]{1,8})$/i)?.[1].toUpperCase() || file.type || '文件';
+}
 function fileBadge(file) {
-  const ext=file.name.split('.').at(-1).toUpperCase();
+  const ext=fileFormat(file);
   return `<span class="file-format ${file.type==='表格'?'spreadsheet':''}" aria-hidden="true">${escape(ext.slice(0,4))}</span>`;
 }
 const exampleAssetSizes = {'weekly-report.docx':39526,'channel-breakdown.xlsx':7622,'channel-source.xlsx':6668,'launch-plan.docx':39372,'monthly-sales.xlsx':8112,'launch-brief.pptx':30008};
@@ -339,8 +341,9 @@ function resourceMenu() {
 }
 function resourceChips() {
   const resources=[['skills',selectedSkill],['knowledge',selectedNote],['database',selectedDatabase]];
-  return `<div class="resource-chips">${resources.map(([key,id])=>byId(key,id)?button(byId(key,id).name,'remove-resource',{glyph:'x',id:key}):'').join('')}
-    ${filesForDraft().map(id=>byId('files',id)).filter(Boolean).map(file=>button(file.name,'remove-attachment',{glyph:'x',id:file.id})).join('')}</div>`;
+  const chip=(name,action,id)=>`<button type="button" class="button" data-action="${action}" data-id="${escape(id)}" title="${escape(name)}" aria-label="移除 ${escape(name)}">${icon('x')}<span>${escape(name)}</span></button>`;
+  return `<div class="resource-chips">${resources.map(([key,id])=>byId(key,id)?chip(byId(key,id).name,'remove-resource',key):'').join('')}
+    ${filesForDraft().map(id=>byId('files',id)).filter(Boolean).map(file=>chip(file.name,'remove-attachment',file.id)).join('')}</div>`;
 }
 function attachedFiles(chat) {
   const ids=[...(chat?.attachments||[]),...(chat?.messages||[]).flatMap(message=>message.attachments||[])];
@@ -384,7 +387,7 @@ function spaceResults(chat) {
   if (spaceSort==='newest') groups.sort((a,b)=>new Date(b.updated||0)-new Date(a.updated||0));
   const sort=files=>spaceSort==='name' ? files.toSorted((a,b)=>a.name.localeCompare(b.name,'zh-CN')) : files.toSorted((a,b)=>new Date(b.at||0)-new Date(a.at||0));
   if (!groups.length) return `<div class="space-empty"><span class="tile-icon">${icon('folder-open')}</span><strong>${spaceSearch || spaceType!=='all' ? '没有匹配的文件' : '暂无文件'}</strong><p>${spaceSearch || spaceType!=='all' ? '可以调整类型或搜索词。' : '会话中生成或上传的文件会显示在这里。'}</p></div>`;
-  return groups.map(group=>`<section class="space-group"><h3>${icon('chevron-down')} ${escape(group.label)} <small>${group.files.length} 个文件</small></h3>
+  return groups.map(group=>`<section class="space-group"><h3>${icon('chevron-down')} <span title="${escape(group.label)}">${escape(group.label)}</span> <small>${group.files.length} 个文件</small></h3>
     ${sort(group.files).map(file=>`<div class="space-file">${fileButton(file)}<small class="space-file-meta">${fileSize(file)}${fileSize(file)&&group.updated?' · ':''}${beijingTime(group.updated||file.at,true)}</small>
       <div class="space-file-actions">${button('','download',{id:file.id,glyph:'download',title:'下载 '+file.name})}${button('','delete',{id:file.id,glyph:'trash',title:'删除 '+file.name,extra:'data-collection="files"'})}</div></div>`).join('')}</section>`).join('');
 }
@@ -523,7 +526,7 @@ function projects() {
   const files=[...new Set(state.projects.map(item=>item.file).filter(Boolean))].map(id=>byId('files',id)).filter(Boolean);
   const comments=state.projects.flatMap(item=>(item.comments||[]).map(comment=>({item,...comment})));
   const board=`<div class="board">${statusNames.map((status,index) => `<section class="board-column"><h2><span class="lane-dot lane-${index}"></span>${status}${badge(state.projects.filter(item=>item.status===status).length)}</h2>
-    ${state.projects.filter(item=>item.status===status).map(item=>`<article class="panel board-card"><h3><button class="plain project-detail-link" data-action="project-detail" data-id="${item.id}">${escape(item.name)}</button></h3><p>${escape(item.description)}</p><div class="board-bottom"><span>${escape(item.owner || '待分配')}</span>${badge(status==='已完成'?'已完成':item.due||status)}</div></article>`).join('') || empty('暂无任务')}</section>`).join('')}</div>`;
+    ${state.projects.filter(item=>item.status===status).map(item=>`<article class="panel board-card"><h3><button class="plain project-detail-link" title="${escape(item.name)}" data-action="project-detail" data-id="${item.id}">${escape(item.name)}</button></h3><p>${escape(item.description)}</p><div class="board-bottom"><span>${escape(item.owner || '待分配')}</span>${badge(status==='已完成'?'已完成':item.due||status)}</div></article>`).join('') || empty('暂无任务')}</section>`).join('')}</div>`;
   const tabs=[['overview','概览'],['board','任务看板'],['files','项目文件'],['activity','活动记录']];
   const projectTab=tabs.some(([key])=>key===routeDetail)?routeDetail:'board';
   let content=board;
@@ -591,7 +594,7 @@ function taskSchedule(tags) {
     <div class="day-agenda"><h3>周${week[scheduleDay]}的计划${scheduleDay===beijingWeekday()?' · 今天':''}</h3>${dayTasks.map(task=>`<button type="button" data-action="runs" data-id="${escape(task.id)}"><time>${escape(task.time)}</time><span>${escape(task.name)}</span>${icon('chevron-right')}</button>`).join('')||empty('这一天没有启用的计划。')}</div></div>
     <div class="schedule-types"><div class="view-heading"><h2>任务分类</h2><span>${tags.length} 类</span></div><div class="type-grid">${tags.map(tag=>{
       const items=state.tasks.filter(item=>item.tag===tag);
-      return `<button type="button" class="panel type-card" data-action="task-by-type" data-id="${escape(tag)}"><span class="type-symbol">${icon(({'经营分析':'chart-no-axes-combined','内容运营':'file-text','数据处理':'database'})[tag]||'folder')}</span><span><strong>${escape(tag)}</strong><small>${items.length} 项任务 · ${items.filter(t=>t.enabled).length} 项已启用</small></span>${icon('chevron-right')}</button>`;}).join('')||empty('暂无分类')}</div></div></section>`;
+      return `<button type="button" class="panel type-card" title="${escape(tag)}" data-action="task-by-type" data-id="${escape(tag)}"><span class="type-symbol">${icon(({'经营分析':'chart-no-axes-combined','内容运营':'file-text','数据处理':'database'})[tag]||'folder')}</span><span><strong>${escape(tag)}</strong><small>${items.length} 项任务 · ${items.filter(t=>t.enabled).length} 项已启用</small></span>${icon('chevron-right')}</button>`;}).join('')||empty('暂无分类')}</div></div></section>`;
 }
 function taskRows() {
   const visible=state.tasks.filter(item=>item.name.toLowerCase().includes(taskSearch.trim().toLowerCase()) &&
@@ -687,7 +690,7 @@ function visibleFiles() {
 }
 function fileTile(file,actions=false) {
   const table=file.sections?.find(section=>section.table)?.table;
-  const ext=file.name.split('.').at(-1).toUpperCase();
+  const ext=fileFormat(file);
   let face='';
   let kind='document';
   if (file.asset==='launch-brief.pptx') {
@@ -702,7 +705,7 @@ function fileTile(file,actions=false) {
     face=excerpt?`<span class="mini-page"><b>${escape(file.title||file.name)}</b><span>${escape(excerpt.slice(0,110))}</span></span>`:`<span class="format-cover">${icon('file-text')}${escape(ext)}</span>`;
   }
   return `<article class="file-tile"><button type="button" data-action="file-preview" data-id="${escape(file.id)}" aria-label="预览 ${escape(file.name)}"><span class="file-art file-art-${kind}" aria-hidden="true">${face}</span>
-    <span class="tile-caption"><strong>${escape(file.name)}</strong><small>${escape(ext)}${fileSize(file)?' · '+escape(fileSize(file)):''}</small></span></button>
+    <span class="tile-caption"><strong title="${escape(file.name)}">${escape(file.name)}</strong><small>${escape(ext)}${fileSize(file)?' · '+escape(fileSize(file)):''}</small></span></button>
     ${actions?`<div class="tile-tools">${libraryFileActions(file)}</div>`:''}</article>`;
 }
 function libraryFileActions(file) {
@@ -738,7 +741,7 @@ function collection(key) {
     const installed = state.skills.some(skill=>skill.marketId === item.id);
     const hired=marketList&&!!byId('staff',item.id);
     const glyph=key==='staff'?({s1:'📊',s2:'🔎',s3:'📝'}[item.id]||icon('bot')):icon(groups.flatMap(([,links])=>links).find(([name])=>name===key)[2]);
-    return `<article class="panel collection-card${key==='staff'?' employee-card':''}" data-search="${escape(item.name+' '+item.description)}"><header><span class="tile-icon" aria-hidden="true">${glyph}</span><h2>${escape(item.name)}</h2></header><p>${escape(item.description)}</p>
+    return `<article class="panel collection-card${key==='staff'?' employee-card':''}" data-search="${escape(item.name+' '+item.description)}"><header><span class="tile-icon" aria-hidden="true">${glyph}</span><h2 title="${escape(item.name)}">${escape(item.name)}</h2></header><p>${escape(item.description)}</p>
     <div class="collection-footer"><div class="card-meta">${item.specialty ? badge(item.specialty) : ''}</div>
     <div class="row-actions">${marketList ? button(hired?'已加入':'聘用','hire-staff',{id:item.id,disabled:hired,primary:!hired}) : key==='market' ? button(installed?'已添加':'安装','install',{id:item.id,disabled:installed,primary:!installed})
      : `${key==='staff'?button('对话','staff-chat',{id:item.id,primary:true})+button('','staff-detail',{id:item.id,glyph:'settings',title:'能力配置'}):''}${key==='skills'?button('查看详情','skill-detail',{id:item.id,primary:true}):''}${button('编辑','edit',{id:item.id,extra:`data-collection="${key}"`})}${button('','delete',{id:item.id,glyph:'trash',title:'删除 '+item.name,extra:`data-collection="${key}"`})}`}</div></div></article>`;
@@ -772,7 +775,7 @@ function database() {
   return `<div class="database-page"><div class="database-title"><h1>数据库</h1></div><div class="page">
     <div class="database-list-head"><div><h2>数据库连接</h2><small>共 ${state.database.length} 个</small></div>${button('新增','edit',{glyph:'plus',extra:'data-collection="database"'})}</div>
     <div class="panel database-list">
-    ${state.database.map(item => `<article class="database-connection"><div><h3>${escape(item.name)}</h3><p>${escape(item.description)}</p></div><span>${escape(item.engine)}</span>
+    ${state.database.map(item => `<article class="database-connection"><div><h3 title="${escape(item.name)}">${escape(item.name)}</h3><p>${escape(item.description)}</p></div><span>${escape(item.engine)}</span>
       <code>${item.source?escape(databases[item.source].table):escape(item.host)+':'+escape(item.port)+'/'+escape(item.database)}</code><div class="row-actions">${item.source?button('查询数据','query-db',{id:item.id,glyph:'database'}):button('检查配置','check-db',{id:item.id})+button('编辑','edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></article>`).join('') || empty('暂无连接配置')}
     </div><p class="footnote">演示库连接服务器上的 SQLite，支持只读查询。自行新增的连接为本地配置草稿。</p></div></div>`;
 }

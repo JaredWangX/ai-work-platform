@@ -227,3 +227,157 @@ dialog:has(.editor-fields) .dialog-header {padding:17px 21px;background:linear-g
   .case-replay {gap:10px}
   .case-replay footer {position:sticky;bottom:0;padding:5px 0;background:var(--panel)}
 }
+
+/* Keep previews compact. Opening a record still shows its complete text. */
+.home-side, .board-column, .team-layout > *, .type-card > span,
+.collection-card > header, .card-meta, .task-identity > div,
+.file-chip > span:last-child {
+  min-inline-size: 0;
+}
+
+.card-name, .project-detail-link, .collection-card > header h2,
+.side-row > strong, .recent-work :is(strong, span), .type-card strong, .day-agenda button > span,
+.board-bottom > span:first-child, .card-meta .badge, .team-select :is(strong, small),
+.team-members :is(h3, small), .database-connection :is(h3, code),
+.library-open :is(strong, small), .tile-caption small, .file-chip strong,
+.task-identity strong, .task-identity .badge, .stage-items strong,
+.space-group h3 > span, .resource-option :is(strong, small), .resource-chips .button span {
+  display: block;
+  max-inline-size: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.staff-card > p, .collection-card > p, .board-card > p,
+.dossier-caption small, .tile-caption strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.55;
+  block-size: 3.1em;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.home .staff-card, .collection-card, .board-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+}
+.staff-card .button { justify-self: start; }
+.card-name {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+.card-name:hover { color: var(--link); }
+.collection-card > header { min-height: 2.6rem; }
+.collection-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.collection-footer .card-meta { grid-template-columns: minmax(0, 1fr); margin: 0; }
+.collection-footer .row-actions { justify-content: end; }
+.collection-card { container: resource-card / inline-size; }
+@container resource-card (max-width: 255px) {
+  .collection-footer { grid-template-columns: minmax(0, 1fr); }
+  .collection-footer .row-actions { justify-content: start; }
+}
+
+.board-column { grid-template-columns: minmax(0, 1fr); }
+.board-card { gap: 9px; }
+.board-card > p { margin: 0; }
+.board-bottom { flex-wrap: nowrap; }
+.board-bottom .badge { flex: none; }
+.team-select { max-inline-size: 100%; }
+.team-detail, .dialog-header, .dialog-body { overflow-wrap: anywhere; }
+.database-connection > div:first-child { min-inline-size: 0; }
+.resource-chips { max-block-size: 5rem; overflow-y: auto; }
+.resource-chips .button { max-inline-size: min(19rem, 100%); }
+.database-connection p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.5;
+  block-size: 3em;
+  overflow: hidden;
+}
+.task-filters > select { min-inline-size: 0; max-inline-size: 10rem; }
+.task-identity small { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+@media (min-width: 721px) {
+  .task-filters { grid-template-columns: minmax(8rem, 18rem) minmax(6rem, 7rem) minmax(6rem, 9rem) 1fr; }
+  .tasks-page .responsive-table { table-layout: fixed; min-inline-size: 43rem; }
+  .tasks-page th:first-child { width: 29%; }
+  .tasks-page th:last-child { width: 11rem; }
+}
+@media (max-width: 680px) {
+  .task-filters > select { max-inline-size: 100%; }
+  .file-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Blue-tinted glass marks the writing surface and the menus above it. */
+:root {
+  --glass-edge: color-mix(in srgb, var(--accent) 26%, var(--line));
+  --glass-rim: rgb(255 255 255 / 86%);
+  --glass-shadow: 0 6px 20px -12px rgb(27 71 131 / 30%);
+}
+:root[data-theme=dark] {
+  --glass-edge: color-mix(in srgb, var(--focus) 30%, var(--line));
+  --glass-rim: rgb(206 230 255 / 14%);
+  --glass-shadow: 0 8px 22px -11px rgb(0 7 17 / 52%);
+}
+.home-compose, .composer.panel, .resource-picker, .control-menu {
+  border-color: var(--glass-edge);
+  box-shadow: inset 0 1px var(--glass-rim), var(--glass-shadow);
+}
+.home-compose, .composer.panel {
+  background: linear-gradient(112deg,
+    var(--panel) 8%, color-mix(in srgb, var(--soft) 32%, var(--panel)) 65%,
+    color-mix(in srgb, var(--soft) 84%, var(--panel)));
+}
+.home-compose textarea, .composer.panel textarea { background: transparent; }
+.home-compose:focus-within, .composer.panel:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 16%, transparent), inset 0 1px var(--glass-rim);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .home-compose, .composer.panel, .resource-picker, .control-menu {
+    -webkit-backdrop-filter: blur(14px) saturate(118%);
+    backdrop-filter: blur(14px) saturate(118%);
+  }
+  .home-compose, .composer.panel {
+    background: linear-gradient(112deg,
+      color-mix(in srgb, var(--panel) 94%, transparent) 8%,
+      color-mix(in srgb, var(--panel) 76%, var(--soft)) 65%,
+      color-mix(in srgb, var(--soft) 82%, transparent));
+  }
+  .resource-picker, .control-menu {
+    background: color-mix(in srgb, var(--panel) 97%, transparent);
+  }
+  .resource-option:not(:hover, :focus-visible) { background: transparent; }
+  .folder-front {
+    background: linear-gradient(115deg, color-mix(in srgb, var(--cover) 54%, transparent),
+      color-mix(in srgb, var(--cover) 88%, transparent));
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    border-block-start: 1px solid rgb(255 255 255 / 55%);
+  }
+}
+.home-compose .resource-picker { top: calc(100% + 6px); }
+.home-compose:has(.resource-picker), .composer:has(.resource-picker) {
+  z-index: 7;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .home-compose, .composer.panel, .resource-picker, .control-menu {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--panel);
+  }
+  .folder-front { background: var(--cover); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
