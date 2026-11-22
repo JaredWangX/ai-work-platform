@@ -19,6 +19,10 @@ if (ENGINE / "app/office/build_docs.py").is_file():
 else:
     from open_office import build_workbook, build_docx, build_pptx
 
+from office_finish import finish_word, finish_workbook, validate_formula
+
+NUMBER_FORMATS = {"number": "#,##0.##", "integer": "#,##0", "percent": "0.0%", "text": "General"}
+
 XML_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
@@ -54,11 +58,28 @@ def normalize(raw):
                 if not isinstance(row, list) or len(row) != len(columns):
                     raise ValueError("表格列数不一致")
                 values.append([cell if type(cell) in (float, int) and abs(cell) <= 1e15 else clean(cell, 600) for cell in row])
-            section["table"] = dict(columns=columns, rows=values)
+            formats = table.get("formats", [])
+            if formats and (not isinstance(formats, list) or len(formats) != len(columns)
+                            or any(f not in NUMBER_FORMATS for f in formats)):
+                raise ValueError("每列应对应一种有效格式")
+            section["table"] = dict(columns=columns, rows=values, formats=formats)
+        if fmt == "pptx" and item.get("chart"):
+            chart = item["chart"]
+            if chart not in ("column", "bar", "line") or not table or not values or not 2 <= len(columns) <= 5:
+                raise ValueError("图表需要类别列和数值列")
+            if any(not str(row[0]).strip() or any(type(n) not in (int, float) for n in row[1:]) for row in values):
+                raise ValueError("图表数值须为数字")
+            section["chart"] = chart
         if (fmt == "xlsx" and not table) or not (text or table):
             raise ValueError("缺少正文或表格")
         sections.append(section)
     return fmt, title, sections
+
+
+def display_row(table, row):
+    formats = table["formats"] or ["text"] * len(row)
+    return [f"{value:.1%}" if fmt == "percent" and type(value) in (int, float) else str(value)
+            for value, fmt in zip(row, formats)]
 
 
 def word(title, sections):
@@ -70,8 +91,13 @@ def word(title, sections):
             widths = [9000 // len(table["columns"])] * len(table["columns"])
             blocks.append({"type":"table", "columnWidths":widths, "width":sum(widths),
                            "rows":[{"cells":[{"text":str(c), "width":w, "shading":"DBEAFE" if i == 0 else "FFFFFF"}
-                                             for c,w in zip(row,widths)]} for i,row in enumerate([table["columns"], *table["rows"]])]})
-    return {"default":{"font":"Microsoft YaHei","size":22}, "sections":[{"children":blocks}]}
+                                             for c,w in zip(row,widths)]} for i,row in enumerate([table["columns"], *(display_row(table, row) for row in table["rows"])])]})
+    return {"default": {"font":"Microsoft YaHei","size":22},
+            "styles": {"Heading1":{"size":42,"bold":True,"fontColor":"172D49"},
+                       "Heading2":{"size":29,"bold":True,"fontColor":"2257A0"}},
+            "sections":[{"properties":{"page":{"size":{"width":11906,"height":16838},
+                         "margin":{"top":1240,"bottom":1240,"left":1453,"right":1453}}},
+                         "footers":{"default":[{"runs":[{"text":"OFFICE_PAGE_FIELD"}]}]}, "children":blocks}]}
 
 
 def slides(title, sections):
@@ -89,14 +115,36 @@ def slides(title, sections):
         elements = [text(title, .62, .33, 8.7, .29, 11, "90B9FF" if dark else "225FB9", True),
                     text(s["title"], .62, .92, 8.7, .9, 31, ink, True),
                     text(f"{index+1:02d} / {len(sections):02d}", 8.35, 5.12, 1.02, .24, 10, muted)]
-        beside = table and s["text"] and len(table["columns"]) <= 4
-        if s["text"]:
+        chart = s.get("chart")
+        beside = table and s["text"] and (chart or len(table["columns"]) <= 4)
+        lines = [line.strip() for line in s["text"].splitlines() if line.strip()]
+        numbered = [re.fullmatch(r"(\d{1,2})[.、．)]\s*(.+)", line) for line in lines]
+        if not table and 2 <= len(lines) <= 4 and all(numbered) and all(len(m[2]) <= 85 for m in numbered):
+            step = 2.88 / len(numbered)
+            for j, match in enumerate(numbered):
+                y = 1.95 + j * step
+                elements.append(text(match[1].zfill(2), .65, y, .55, .48, 16,
+                                     "90B9FF" if dark else "225FB9", True))
+                elements.append(text(match[2], 1.35, y, 7.9, min(step-.05,.76), 17, muted))
+        elif s["text"]:
             elements.append(text(s["text"], .65, 1.97, 3.45 if beside else 8.62,
                                  2.60 if beside or not table else .95, 18 if beside else 17, muted))
-        if table:
+        if chart:
+            data = [{"name":name, "labels":[str(row[0]) for row in table["rows"]],
+                     "values":[row[i] for row in table["rows"]]} for i,name in enumerate(table["columns"][1:],1)]
+            percent_axis = bool(table["formats"]) and all(f == "percent" for f in table["formats"][1:])
+            elements.append(dict(type="chart", chart="line" if chart=="line" else "bar",
+                                 barDir="bar" if chart=="bar" else "col", barGrouping="clustered", data=data,
+                                 valAxisLabelFormatCode="0%" if percent_axis else "General",
+                                 x=4.25 if beside else .65, y=1.96, w=5.12 if beside else 8.65, h=2.95,
+                                 chartArea={"fill":{"color":"FFFFFF"}}, chartColors=["3069B2","148179","B67719","7556A3"],
+                                 showLegend=len(data)>1, legendPos="b", legendFontSize=10,
+                                 catAxisLabelFontSize=11, valAxisLabelFontSize=10,
+                                 catAxisLabelColor="344B63", valAxisLabelColor="344B63", legendColor="344B63"))
+        elif table:
             rows = [[{"text":str(cell),"options":{"bold":r == 0, "fill":"2357A1" if r == 0 else "EFF4FA",
                                                   "color":"FFFFFF" if r == 0 else "183250"}} for cell in row]
-                    for r,row in enumerate([table["columns"],*table["rows"]])]
+                    for r,row in enumerate([table["columns"], *(display_row(table, row) for row in table["rows"])])]
             elements.append(dict(type="table",rows=rows,x=4.49 if beside else .65,
                                  y=2.06 if beside or not s["text"] else 3.0,w=4.88 if beside else 8.65,
                                  rowH=min(.46,(2.78 if beside else 1.9)/len(rows)),fontFace="Microsoft YaHei",
@@ -105,37 +153,49 @@ def slides(title, sections):
     return {"title":title,"layout":"LAYOUT_16x9","slides":result}
 
 
-# Only arithmetic, ranges, and aggregate functions over cells of this sheet.
-FORMULA = re.compile(r"=(?:\s+|SUM|AVERAGE|MIN|MAX|COUNT|ROUND|ABS|[A-L](?:[1-9]\d{0,2})|\d+(?:\.\d+)?|[()+*/,:.%\-])+", re.I)
-
-
 def workbook(sections):
-    sheets = []
-    names = set()
+    names = []
+    used = set()
     for section in sections:
         base = re.sub(r"[\\/\[\]:*?]", "_", section["title"]).strip("'")[:31] or "Sheet"
         name = base
         i = 1
-        while name.casefold() in names:
+        while name.casefold() in used:
             i += 1
             name = base[:30-len(str(i))]+" "+str(i)
-        names.add(name.casefold())
+        used.add(name.casefold())
+        names.append(name)
+
+    sheets = []
+    for name, section in zip(names, sections):
         t = section["table"]
         rows = [t["columns"][:], *[row[:] for row in t["rows"]]]
         cells = {}
         widths = {}
         for ci,col in enumerate(t["columns"]):
             letter = chr(65+ci)
-            widths[letter] = min(55,max(13, max(len(str(row[ci]))*1.65 for row in rows)+2))
+            widths[letter] = min(55,max(13, max((len(str(row[ci]))*1.65 if not str(row[ci]).startswith("=") else 12) for row in rows)+2))
             cells[letter+"1"] = {"style":{"bold":True,"fill":"2257A0","fontColor":"FFFFFF","wrap":True}}
         for ri,row in enumerate(rows,1):
             for ci,v in enumerate(row):
-                if isinstance(v,str) and v.startswith("="):
-                    key = chr(65+ci)+str(ri)
-                    if ri == 1 or not FORMULA.fullmatch(v):
-                        raise ValueError("仅支持本表算术与汇总公式")
-                    cells[key] = {"formula":v}
+                is_formula = isinstance(v,str) and v.startswith("=")
+                if ri == 1:
+                    if is_formula:
+                        raise ValueError("表头应为文字")
+                    continue
+                key = chr(65+ci)+str(ri)
+                style = {}
+                if t["formats"]:
+                    style["numberFormat"] = NUMBER_FORMATS[t["formats"][ci]]
+                if is_formula:
+                    validate_formula(v, used)
+                    style["fontColor"] = "146653" if "!" in v else "172D49"
+                    cells[key] = {"formula":v, "style":style}
                     row[ci] = None
+                elif type(v) in (int, float) or style:
+                    if type(v) in (int, float):
+                        style["fontColor"] = "2257A0"
+                    cells[key] = {"style":style}
         sheets.append(dict(name=name,rows=rows,cells=cells,colWidths=widths))
     return {"sheets":sheets}
 
@@ -147,9 +207,11 @@ def render(raw):
         out = folder / ("output."+fmt)
         if fmt == "xlsx":
             build_workbook(workbook(sections), out)
+            finish_workbook(out)
         else:
             if fmt == "docx":
                 build_docx(word(title, sections), [], out)
+                finish_word(out)
             else:
                 build_pptx(slides(title, sections), [], out)
         with ZipFile(out) as archive:

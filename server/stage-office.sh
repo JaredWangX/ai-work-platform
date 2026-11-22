@@ -10,5 +10,5 @@ git -C "$repo" archive --format=tar --output="$output/office-source.tar" "$revis
   app/config.py app/runtime.py app/office/build_docs.py app/office/xlsx_build.py \
   app/office/renderers/docx_build.js app/office/renderers/pptx_build.js
 tar -xf "$output/office-source.tar" -C "$output"
-cp "$(dirname "$0")/office_render.py" "$output/"
+cp "$(dirname "$0")/office_render.py" "$(dirname "$0")/office_finish.py" "$output/"
 git -C "$repo" rev-parse "$revision" > "$output/renderer-revision"
