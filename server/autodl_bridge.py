@@ -15,6 +15,9 @@ from fastapi.responses import StreamingResponse
 
 from contextlib import asynccontextmanager
 import workspace
+import connections
+from contextlib import closing
+from starlette.concurrency import iterate_in_threadpool
 
 @asynccontextmanager
 async def lifespan(app):
@@ -38,9 +41,20 @@ def seal_event(header, sequence, line):
     encrypted = cipher.encrypt(nonce, line, b"\x03" + header + sequence.to_bytes(4, "big"))
     return base64.b64encode(nonce + encrypted) + b"\n"
 
-async def stream_chat(body, header):
+async def stream_chat(body, header, custom=None):
     sequence = 0
     try:
+        if custom:
+            config,request=custom
+            lines=connections.model_lines(config,request)
+            try:
+                async for frame in iterate_in_threadpool(lines):
+                    yield seal_event(header,sequence,frame)
+                    sequence+=1
+            finally:
+                await asyncio.to_thread(lines.close)
+            yield seal_event(header, sequence, b"")
+            return
         async with httpx.AsyncClient(timeout=httpx.Timeout(100, connect=5), trust_env=False) as client:
             async with client.stream("POST", model_origin+"/v1/chat/completions",
                                      content=body, headers={**model_headers, "Content-Type": "application/json"}) as upstream:
@@ -52,7 +66,7 @@ async def stream_chat(body, header):
                     sequence += 1
                     if line == "data: [DONE]":
                         break
-    except httpx.HTTPError as error:
+    except (httpx.HTTPError,OSError,ValueError) as error:
         code = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else 503
         data = json.dumps({"error": {"code": code}})
         yield seal_event(header, sequence, (f"data: {data}\n\n").encode())
@@ -84,7 +98,7 @@ async def render_office(body):
 async def handle_bridge(request: Request):
     envelope = bytearray()
     async for chunk in request.stream():
-        if len(envelope) + len(chunk) > 140_000:
+        if len(envelope) + len(chunk) > 5_450_000:
             return Response(status_code=413)
         envelope.extend(chunk)
     if len(envelope) < 36:
@@ -112,14 +126,38 @@ async def handle_bridge(request: Request):
     body = payload.get("body")
     if route != "models" and not isinstance(body, str):
         return Response(status_code=400)
+    custom=None
+    if route in ("chat","chat-stream","models") and body:
+        message=json.loads(body)
+        if "customModel" in message:
+            try:
+                with closing(workspace.ledger()) as db:
+                    config=connections.credentials(db,message["owner"],message["customModel"],"model")
+                custom=(config,message.get("request",{}))
+            except (ValueError,KeyError):
+                return Response(status_code=400)
     if route == "chat-stream":
-        return StreamingResponse(stream_chat(body, header), media_type="application/octet-stream",
+        return StreamingResponse(stream_chat(body, header, custom), media_type="application/octet-stream",
                                  headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
     if route == "workspace":
         try:
-            result={"status":200,"body":workspace.service(json.loads(body))}
+            result={"status":200,"body":await asyncio.to_thread(workspace.service,json.loads(body))}
         except (ValueError,KeyError,TypeError) as err:
             result={"status":400,"body":{"error":str(err)[:100]}}
+        except Exception:
+            result={"status":400,"body":{"error":"连接失败，请检查主机、TLS 证书、只读账号和网络授权"}}
+    elif custom:
+        try:
+            config,options=custom
+            if route=="models":
+                connections_test={"messages":[{"role":"user","content":"Reply OK."}],"max_tokens":8,"stream":False}
+                reply=await asyncio.to_thread(connections.model_json,config,connections_test)
+                if not reply.get("choices"):raise ValueError("模型连接测试失败")
+                data={"data":[{"id":config["model"]}]}
+            else:data=await asyncio.to_thread(connections.model_json,config,options)
+            result={"status":200,"body":data}
+        except (OSError,ValueError) as err:
+            result={"status":502,"body":{"error":str(err) if isinstance(err,ValueError) and "模型" in str(err) else "模型接口未响应，请检查连接"}}
     elif route == "office":
         result = await render_office(body)
     else:

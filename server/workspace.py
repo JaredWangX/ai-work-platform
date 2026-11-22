@@ -1,4 +1,7 @@
 """Private workspace service: read-only sample data and durable Beijing schedules."""
+import file_reader
+import accounts
+import connections
 import asyncio
 import hashlib
 import json
@@ -29,6 +32,8 @@ def ledger():
 def initialize():
     DATA.mkdir(mode=0o700, parents=True, exist_ok=True)
     with closing(ledger()) as db, db:
+        accounts.setup(db)
+        connections.setup(db)
         db.executescript("""
         CREATE TABLE IF NOT EXISTS jobs(owner TEXT,id TEXT,config TEXT,next_at INTEGER,PRIMARY KEY(owner,id));
         CREATE INDEX IF NOT EXISTS due ON jobs(next_at);
@@ -84,27 +89,77 @@ def next_slot(config, now):
 
 
 def settings(raw):
-    keys={"id":80,"name":100,"description":2400,"time":5,"frequency":10,"tag":90,"assignee":90,"instructions":700,"source":10}
+    keys={"id":80,"name":100,"description":2400,"time":5,"frequency":10,"tag":90,"assignee":90,"instructions":700,"source":64,"skillId":80,"noteId":80,"fileId":80}
     cfg={k:raw.get(k,"") for k in keys}
     if any(not isinstance(v,str) or len(v)>keys[k] for k,v in cfg.items()):raise ValueError("任务字段无效")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}",cfg["id"]) or not cfg["name"].strip() or not cfg["description"].strip():raise ValueError("请填写任务名称和指令")
     if cfg["frequency"] not in FREQUENCIES or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d",cfg["time"]) or type(raw.get("enabled")) is not bool:raise ValueError("调度设置无效")
-    if cfg["source"] and cfg["source"] not in SCHEMAS:raise ValueError("请选择演示数据源")
+    refs=raw.get("references",[])
+    if not isinstance(refs,list) or len(refs)>3:raise ValueError("任务资料过多")
+    cfg["references"]=[]
+    for ref in refs:
+        if not isinstance(ref,dict) or ref.get("kind") not in ("skill","knowledge","attachment") or not isinstance(ref.get("text"),str) or len(ref["text"])>3000 or not isinstance(ref.get("name"),str) or not 1<=len(ref["name"])<=160:raise ValueError("任务资料格式无效")
+        cfg["references"].append({k:ref[k] for k in ("kind","text","name")})
     cfg["enabled"]=raw["enabled"]
     return cfg
 
 
 def service(payload):
     action=payload.get("action")
-    if action=="query":return query(payload.get("source"),payload.get("sql"))
+    if action=="query" and payload.get("source") in SCHEMAS:return query(payload.get("source"),payload.get("sql"))
     token=payload.get("workspace","")
-    if not isinstance(token,str) or not re.fullmatch(r"[a-f0-9]{64}",token):raise ValueError("缺少工作空间身份")
-    owner=hashlib.sha256(token.encode()).hexdigest()
     now=int(time.time())
     with closing(ledger()) as db, db:
+        if action in ("register","login","recover"):
+            return accounts.sign(db,action,payload.get("params") or {},token)
+        internal=payload.get("internalOwner")
+        if internal and re.fullmatch(r"[a-f0-9]{64}",internal):
+            who={"owner":internal,"role":"internal","person":None}
+        else:who=accounts.identity(db,token)
+        owner=who["owner"]
+        if action in ("account","logout","members","joinTeam","switchTeam","invite","revokeInvite","removeMember","getPrefs","setPrefs","changePassword","issueRecovery"):
+            return accounts.team(db,who,action,payload.get("params") or {},token)
+        if action in ("syncIndex","syncPut","syncGet","syncCommit"):
+            return accounts.cloud(db,who,action,payload.get("params") or {})
+        if action=="runtime":
+            row=db.execute("SELECT summary FROM connections WHERE owner=? AND active=1",(owner,)).fetchone()
+            return {"owner":owner,**(json.loads(row[0]) if row else {})}
+        if who["role"]=="member" and action in ("saveConnection","removeConnection","activateModel"):
+            raise ValueError("连接由工作空间管理员管理")
+        if action=="extractText":return file_reader.extract(payload.get("params") or {})
+        if action=="connections":
+            return {"items":[dict(json.loads(row["summary"]),active=bool(row["active"])) for row in db.execute("SELECT summary,active FROM connections WHERE owner=? ORDER BY rowid",(owner,))]}
+        if action=="saveConnection":
+            return connections.save(db,owner,payload["config"])
+        if action=="activateModel":
+            cid=payload.get("id","")
+            db.execute("BEGIN IMMEDIATE")
+            if cid:connections.credentials(db,owner,cid,"model")
+            db.execute("UPDATE connections SET active=0 WHERE owner=? AND active=1",(owner,))
+            if cid:db.execute("UPDATE connections SET active=1 WHERE owner=? AND id=?",(owner,cid))
+            return {"ok":True}
+        if action=="mcp":
+            config=connections.credentials(db,owner,payload.get("id"),"tool")
+            return connections.mcp(config,payload.get("operation"),payload.get("params") or {})
+        if action=="activeModel":
+            row=db.execute("SELECT summary FROM connections WHERE owner=? AND active=1",(owner,)).fetchone()
+            return json.loads(row[0]) if row else {}
+        if action=="removeConnection":
+            cid=payload.get("id")
+            db.execute("BEGIN IMMEDIATE")
+            if any(json.loads(j[0]).get("source")==cid for j in db.execute("SELECT config FROM jobs WHERE owner=?",(owner,))):
+                raise ValueError("请先从定时任务中移除此数据源")
+            db.execute("DELETE FROM connections WHERE owner=? AND id=?",(owner,cid))
+            return {"ok":True}
+        if action in ("describe","query"):
+            source=payload.get("source")
+            config=connections.credentials(db,owner,source,"database")
+            if action=="query":return connections.select_rows(config,payload.get("sql"))
+            return {"engine":config["engine"],"table":config["table"],"columns":connections.schema(config)}
         if action=="save":
             cfg=settings(payload["task"])
             db.execute("BEGIN IMMEDIATE")
+            if cfg["source"] and cfg["source"] not in SCHEMAS:connections.credentials(db,owner,cfg["source"],"database")
             prev=db.execute("SELECT config,next_at FROM jobs WHERE owner=? AND id=?",(owner,cfg["id"])).fetchone()
             if not prev and (db.execute("SELECT count(*) FROM jobs WHERE owner=?",(owner,)).fetchone()[0]>=8 or db.execute("SELECT count(*) FROM jobs").fetchone()[0]>=256):raise ValueError("服务器调度名额已满")
             next_at=next_slot(cfg,now) if cfg["enabled"] else None
@@ -141,7 +196,7 @@ def claim(now):
         db.execute("UPDATE jobs SET next_at=? WHERE owner=? AND id=?",(next_slot(cfg,now),job["owner"],job["id"]))
         db.execute("INSERT INTO runs(id,owner,job,slot,status,prompt) VALUES(?,?,?,?,?,?)",(rid,job["owner"],job["id"],job["next_at"],"running",cfg["description"]))
         db.execute("DELETE FROM runs WHERE owner=? AND job=? AND id NOT IN (SELECT id FROM runs WHERE owner=? AND job=? ORDER BY slot DESC LIMIT 8)",(job["owner"],job["id"],job["owner"],job["id"]))
-        return rid,cfg
+        return rid,{**cfg,"owner":job["owner"]}
 
 
 async def execute(rid,cfg):

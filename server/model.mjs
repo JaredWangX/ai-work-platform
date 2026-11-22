@@ -1,4 +1,4 @@
-import {addQueryResult} from './workspace.mjs';
+import {addQueryResult,callWorkspace} from './workspace.mjs';
 import { requestAutoDL } from './autodl-bridge.mjs';
 import { officeRun, requestedOffice } from './office.mjs';
 import { readEvents } from '../dist/events.mjs';
@@ -22,6 +22,7 @@ function gatewayHeaders(env) {
 }
 
 async function requestModel(env, route, body, timeout) {
+  if(env.customModel)return requestAutoDL(env,route,JSON.stringify({owner:env.owner,customModel:env.customModel,request:body?JSON.parse(body):{}}),timeout);
   if (env.MODEL_BRIDGE_URL && env.MODEL_BRIDGE_KEY) {
     try {
       return await requestAutoDL(env,route,body,timeout);
@@ -58,9 +59,9 @@ function requestMessages(messages) {
   return result;
 }
 
-function streamAnswer(env, payload) {
+function streamAnswer(env, payload, model) {
   const frames = (async function* () {
-    yield {type:'run_start',model:MODEL};
+    yield {type:'run_start',model};
     let received = false;
     let finish;
     try {
@@ -69,7 +70,7 @@ function streamAnswer(env, payload) {
       for await (const frame of readEvents(upstream.body)) {
         if (frame === '[DONE]') {
           if (!received) throw Error('模型未返回可显示的文本');
-          yield {type:'run_end',model:MODEL,truncated:finish==='length'};
+          yield {type:'run_end',model,truncated:finish==='length'};
           return;
         }
         const result = JSON.parse(frame);
@@ -104,17 +105,27 @@ function eventResponse(frames) {
   }),{headers:{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store, no-transform','X-Accel-Buffering':'no'}});
 }
 
-export async function modelRoute(request, env) {
+export async function modelRoute(request, env, internalOwner) {
   const url = new URL(request.url);
   const endpoint = env.MODEL_CHAT_URL;
   const configured = endpoint || (env.MODEL_BRIDGE_URL && env.MODEL_BRIDGE_KEY);
+  let model=MODEL;
+  const token=request.headers.get('X-Workspace');
+  if((token||internalOwner)&&env.MODEL_BRIDGE_URL&&['/api/model','/api/chat'].includes(url.pathname)){
+    if(token&&!/^(?:s\.)?[a-f0-9]{64}$/.test(token))return json({error:'工作空间凭据无效'},403);
+    try{
+      const active=await callWorkspace(env,{action:'runtime',internalOwner,workspace:token});
+      env={...env,owner:active.owner,customModel:active.id};model=active.model||MODEL;
+    }catch{return json({error:'无法读取工作空间模型配置，请稍后重试'},503);}
+  }
   if (url.pathname === '/api/model' && request.method === 'GET') {
     if (!configured) return json({available:false,name:''});
+    if(env.customModel&&!url.searchParams.has('verify'))return json({available:true,name:model,verifiedAtSave:true});
     try {
-      const upstream = await requestModel(env,'models',undefined,4500);
+      const upstream = await requestModel(env,'models',undefined,env.customModel?35000:4500);
       if (upstream.ok) {
         const catalog = await upstream.json();
-        if (catalog.data?.some(entry=>entry.id===MODEL)) return json({available:true,name:MODEL},200,upstream);
+        if (catalog.data?.some(entry=>entry.id===model)) return json({available:true,name:model},200,upstream);
       }
     } catch {}
     return json({available:false,name:''});
@@ -152,13 +163,13 @@ export async function modelRoute(request, env) {
   try { entries = JSON.parse(body)?.messages; } catch { return json({error:'消息格式无效'},400); }
   const messages = requestMessages(entries);
   if (!messages) return json({error:'请求必须包含有效的对话消息和引用资料'},400);
-  try {await addQueryResult(entries,messages,env,requestModel,MODEL);}
-  catch {return json({error:'演示库查询未完成，请核对字段或缩小问题范围后重试。'},422);}
+  try {await addQueryResult(entries,messages,env,requestModel,model);}
+  catch {return json({error:'数据库查询未完成，请核对连接、可读字段和问题范围。'},422);}
   const stream = request.headers.get('Accept')?.includes('text/event-stream') ?? false;
   const formats = requestedOffice(entries);
   if (formats.length) {
     const frames = (async function* () {
-      try { yield* officeRun(env,messages,formats,requestModel,MODEL); }
+      try { yield* officeRun(env,messages,formats,requestModel,model); }
       catch (error) {
         const reason = typeof error?.message==='string' && /[一-龥]/.test(error.message)
           ? error.message : '文件生成服务暂时不可用，请重试。';
@@ -175,13 +186,13 @@ export async function modelRoute(request, env) {
       if(frame.type==='artifact_end')files.push(file);
       if(frame.type==='message_delta')text+=frame.delta;
     }
-    return json({text,files,model:MODEL});
+    return json({text,files,model});
   }
   const payload = JSON.stringify({
-    model:MODEL,messages:[{role:'system',content:systemPrompt},...messages],
+    model,messages:[{role:'system',content:systemPrompt},...messages],
     temperature:0.4,max_tokens:stream?1500:1100,stream,chat_template_kwargs:{enable_thinking:false},
   });
-  if (stream) return streamAnswer(env,payload);
+  if (stream) return streamAnswer(env,payload,model);
   try {
     const upstream = await requestModel(env,'chat',payload,85_000);
     if (!upstream.ok) {
@@ -192,7 +203,7 @@ export async function modelRoute(request, env) {
     const result = await upstream.json();
     const reply = result.choices?.[0]?.message?.content;
     if (typeof reply !== 'string' || !reply.trim()) return json({error:'模型未返回可显示的文本'},502);
-    return json({text:reply,model:MODEL},200,upstream);
+    return json({text:reply,model},200,upstream);
   } catch (error) {
     console.error('Model request failed',error?.name || 'Error',error?.cause?.code || '');
     return json({error:'暂时无法连接模型服务器，请稍后再试'},503);

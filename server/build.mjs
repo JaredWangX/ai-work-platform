@@ -8,6 +8,7 @@ const assets = {
   '/api.mjs':['api.mjs','text/javascript; charset=utf-8'],
   '/app.js':['app.js','text/javascript; charset=utf-8'],
   '/showcase.js':['showcase.js','text/javascript; charset=utf-8'],
+  '/team-sync.mjs':['team-sync.mjs','text/javascript; charset=utf-8'],
   '/workspace-client.mjs':['workspace-client.mjs','text/javascript; charset=utf-8'],
   '/office-files.mjs':['office-files.mjs','text/javascript; charset=utf-8'],
   '/events.mjs':['events.mjs','text/javascript; charset=utf-8'],

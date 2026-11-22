@@ -1,13 +1,14 @@
-function openOfficeStore() {
+const initialScope=localStorage.getItem('workspace-office-scope')||'';
+function openOfficeStore(scope=initialScope) {
   return new Promise((resolve,reject)=>{
-    const request=indexedDB.open('workspace-office-files',1);
+    const request=indexedDB.open('workspace-office-files'+scope,1);
     request.onupgradeneeded=()=>request.result.createObjectStore('files');
     request.onsuccess=()=>resolve(request.result);
     request.onerror=()=>reject(request.error);
   });
 }
-async function officeTransaction(mode, action) {
-  const db=await openOfficeStore();
+async function officeTransaction(mode, action, scope) {
+  const db=await openOfficeStore(scope);
   try {
     return await new Promise((resolve,reject)=>{
       const tx=db.transaction('files',mode);
@@ -17,8 +18,8 @@ async function officeTransaction(mode, action) {
     });
   } finally {db.close();}
 }
-export function putOfficeFiles(files) {
-  return officeTransaction('readwrite',store=>{for(const {id,blob} of files)store.put(blob,id);});
+export function putOfficeFiles(files,scope) {
+  return officeTransaction('readwrite',store=>{for(const {id,blob} of files)store.put(blob,id);},scope);
 }
 export function getOfficeFile(id) {return officeTransaction('readonly',store=>store.get(id));}
 export function removeOfficeFile(id) {return officeTransaction('readwrite',store=>id?store.delete(id):store.clear());}

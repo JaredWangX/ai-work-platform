@@ -1,5 +1,6 @@
+import {teamSync} from './team-sync.mjs';
 import {apiUrl} from './api.mjs';
-import {databases,workspaceAPI} from './workspace-client.mjs';
+import {databases,workspaceAPI,workspaceToken} from './workspace-client.mjs';
 import { putOfficeFiles, getOfficeFile, removeOfficeFile, readOfficeUpload } from './office-files.mjs';
 import { refreshWorkspaceMotion, animateEditor } from './workspace-motion.mjs';
 import { groups, seed } from './data.js';
@@ -11,7 +12,14 @@ import { commandExamples } from './commands.mjs';
 
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
-const storageKey = 'workspace-workspace-v1';
+let account=JSON.parse(localStorage.getItem('workspace-account-info')||'null');
+if(!localStorage.getItem('workspace-account-session'))account=null;
+const guestKey='workspace-workspace-v1';
+const accountKey=info=>guestKey+'/'+info.space+'/'+info.person.id;
+const storageKey=account?accountKey(account):guestKey;
+let syncController,teamDirectory,preferenceRev=0;
+let syncNeedsRender=false;
+
 const pageNames = Object.fromEntries(groups.flatMap(([, links]) => links.map(([key, name]) => [key, name])));
 Object.assign(pageNames,{login:'登录',register:'注册'});
 const statusNames = ['待开始','进行中','已完成'];
@@ -93,6 +101,8 @@ function caseFileIds(example) {
 }
 
 let state = load();
+let modelConnections=[];
+let connectionCatalogError='';
 let connection = {available:false,checking:true};
 let activeChat;
 let activeNote = state.knowledge[0]?.id;
@@ -143,7 +153,7 @@ let overviewStage='进行中';
 let activeStaff='';
 let activeTeam='';
 let staffTab='own';
-let accountTab='users';
+
 let personalTab='memory';
 let showConversationStart = false;
 let homeTab=state.chats.some(chat=>!chat.example || chat.messages.some(m=>m.mode==='live'))?'recent':'cases';
@@ -164,7 +174,7 @@ function toast(text) {
   toastTimer = setTimeout(() => node.classList.remove('visible'), 3600);
 }
 function save() {
-  try { localStorage.setItem(storageKey, JSON.stringify(state)); return true; }
+  try { localStorage.setItem(storageKey, JSON.stringify(state));syncController?.changed();return true; }
   catch { toast('浏览器存储空间不足，请删除一些文件后再试。'); return false; }
 }
 function go(key, options) {
@@ -329,18 +339,18 @@ function fileButton(file, details=false) {
   return `<button type="button" class="file-chip" data-action="file-preview" data-id="${file.id}">${fileBadge(file)}<span><strong>${escape(file.name)}</strong>${details===true&&fileSize(file)?`<small>${fileSize(file)}</small>`:''}</span></button>`;
 }
 function uploadControl(label,kind='attachment',compact=false) {
-  return `<label class="button upload-button${compact?' icon-upload':''}" title="${label}">${icon(kind==='attachment'?'paperclip':'upload')}${compact?'':label}<input type="file" data-upload="${kind}" aria-label="${label}" accept=".txt,.md,.csv,.pdf,.png,.jpg,.jpeg,.webp,.xlsx,.docx,.pptx"></label>`;
+  return `<label class="button upload-button${compact?' icon-upload':''}" title="${label}">${icon(kind==='attachment'?'paperclip':'upload')}${compact?'':label}<input type="file" data-upload="${kind}" aria-label="${label}" title="PDF 和图片在对话中引用时将由服务器提取文字" accept=".txt,.md,.csv,.pdf,.png,.jpg,.jpeg,.webp,.xlsx,.docx,.pptx"></label>`;
 }
 const resourceLabels={models:'模型',skills:'技能',knowledge:'知识库',database:'数据库'};
 function resourceMenu() {
-  const list=picker==='models' ? (connection.available ? [{id:'model-live',name:connection.name,description:'当前默认对话模型'}] : []) : state[picker];
+  const list=picker==='models' ? [{id:'platform',name:'平台模型',description:!modelConnections.some(x=>x.active)?'当前默认':'切换为工作空间默认'},...modelConnections.map(x=>({...x,description:x.model+(x.active?' · 当前默认':'')}))] : state[picker];
   return `<section class="resource-picker" aria-label="选择对话资源"><header>
     <div class="segments" role="group" aria-label="资源类型">${Object.entries(resourceLabels).map(([key,label])=>button(label,'resource-tab',{id:key,extra:`aria-pressed="${key===picker}"`})).join('')}</div>
     ${button('','resource-close',{glyph:'x',title:'关闭资源选择'})}
     </header>
     <input type="search" placeholder="搜索${resourceLabels[picker]}" aria-label="搜索${resourceLabels[picker]}" data-filter="#resource-list">
     <div id="resource-list">${list.map(item=>`<button class="resource-option" type="button" data-action="resource-pick" data-id="${item.id}" data-search="${escape(item.name+' '+(item.description||''))}"><strong>${escape(item.name)}</strong><small>${escape(item.description || '')}</small></button>`).join('') || empty(picker==='models'?modelLabel():'暂无资源')}</div>
-    ${picker==='database'?'<p class="picker-note">选择演示库后，助手会执行只读查询并使用返回的行。</p>':''}
+    ${picker==='database'?'<p class="picker-note">选择数据源后，助手会执行只读查询，并把查询结果发送给当前模型。</p>':''}
   </section>`;
 }
 function resourceChips() {
@@ -701,8 +711,8 @@ function fileTile(file,actions=false) {
   let kind='document';
   if (file.asset==='launch-brief.pptx') {
     kind='slides';face='<img alt="" src="assets/deliverables/launch-slide-1.webp">';
-  } else if(file.type==='图片' && file.data?.startsWith('data:image/')) {
-    kind='image';face=`<img alt="" src="${escape(file.data)}">`;
+  } else if(file.type==='图片' && /^data:image\/(png|jpeg|webp);base64,/i.test(file.thumbnail||file.data)) {
+    kind='image';face=`<img alt="" src="${escape(file.thumbnail||file.data)}">`;
   } else if (file.type==='表格' && table) {
     kind='sheet';
     face=`<span class="mini-grid">${[table.columns,...table.rows.slice(0,3)].map(row=>`<span>${row.slice(0,3).map(cell=>`<i>${escape(cell)}</i>`).join('')}</span>`).join('')}</span>`;
@@ -807,29 +817,130 @@ function teams() {
 function database() {
   const cards=state.database.map(item=>{
     const source=Object.hasOwn(databases,item.source)?databases[item.source]:null;
-    const fields=source?source.schema.split(/\s*·\s*/):[];
-    const structure=source
-      ? `<dl class="schema-fields">${fields.map(field=>{const cut=field.indexOf(' ');return `<div><dt><code>${escape(field.slice(0,cut))}</code></dt><dd>${escape(field.slice(cut+1))}</dd></div>`;}).join('')}</dl>`
+    const fields=source?source.schema.split(/\s*·\s*/).map(field=>{const split=field.indexOf(' ');return [field.slice(0,split),field.slice(split+1)];}):item.columns||[];
+    const structure=fields.length
+      ? `<dl class="schema-fields">${fields.map(([name,type])=>`<div><dt><code>${escape(name)}</code></dt><dd>${escape(type)}</dd></div>`).join('')}</dl>`
       : `<dl class="schema-fields"><div><dt>主机</dt><dd>${escape(item.host||'—')}</dd></div><div><dt>端口</dt><dd>${escape(item.port||'—')}</dd></div></dl>`;
     return `<article class="panel database-connection source-card">
       <header><span class="tile-icon">${icon('database')}</span><div><h2>${escape(item.name)}</h2><p>${escape(item.description)}</p></div></header>
-      <div class="schema-caption"><code>${escape(source?.table||item.database||'—')}</code><small>${source?fields.length+' 个字段':'本地连接配置'}</small></div>
-      ${structure}<footer><small>${escape(item.engine)}</small><div class="row-actions">${source?button('查询数据','query-db',{id:item.id,glyph:'database'}):button('检查配置','check-db',{id:item.id})+button('编辑','edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></footer>
+      <div class="schema-caption"><code>${escape(source?.table||item.table||item.database||'—')}</code><small>${fields.length?fields.length+' 个字段':'待连接'}</small></div>
+      ${structure}<footer><small>${escape(item.engine)}</small><div class="row-actions">${item.source?button('查询数据','query-db',{id:item.id,glyph:'database'}):''}${source?'':button(item.engine==='CSV'?'替换数据':item.remoteConnection?'编辑':'连接',item.engine==='CSV'?'import-csv':'edit',{id:item.id,extra:'data-collection="database"'})+button('删除','delete',{id:item.id,extra:'data-collection="database"'})}</div></footer>
     </article>`;
   });
-  return `<div class="page database-page">${heading('数据库','查看数据源的字段和口径，打开查询即可核对实际记录。',button('新增连接','edit',{primary:true,glyph:'plus',extra:'data-collection="database"'}))}
+  return `<div class="page database-page">${heading('数据库','查看数据源的字段和口径，打开查询即可核对实际记录。','<div class="row-actions">'+button('导入 CSV','import-csv',{glyph:'upload'})+button('新增连接','edit',{primary:true,glyph:'plus',extra:'data-collection="database"'})+'</div>')}
     <div class="view-heading"><h2>数据源</h2><span>${cards.length} 个连接</span></div>
     <div class="sources-grid">${cards.join('')||empty('暂无连接配置')}</div>
-    <p class="footnote">演示库支持只读 SQL。自行新增的连接保存在当前浏览器。</p></div>`;
+    <p class="footnote">支持 PostgreSQL、MySQL 的只读表或视图。服务器验证 TLS 和访问权限后，对话与定时任务即可使用。</p></div>`;
+}
+function connectionForm(kind,item={}) {
+  const input=(key,label,options={})=>`<label>${label}<input name="${key}" value="${escape(item[key]??options.value??'')}" type="${options.type||'text'}" maxlength="${options.length||160}" ${options.optional?'':'required'} autocomplete="${key==='secret'?'new-password':'off'}" placeholder="${escape(options.hint||'')}"></label>`;
+  const model=kind==='model',tool=kind==='tool';
+  return `<form class="edit-form" data-form="connection" data-kind="${kind}" data-id="${escape(item.id||'')}">
+    ${input('name','连接名称',{length:80,hint:model?'如：团队推理模型':'如：门店订单'})}
+    ${tool?input('url','MCP Streamable HTTP 地址',{type:'url',length:1000,hint:'https://域名/mcp'}):model?input('endpoint','模型接口地址',{type:'url',length:1000,hint:'https://域名/v1 或完整聊天接口'})+input('model','模型 ID',{hint:'填写服务商提供的模型标识'}):
+      `<label>数据库类型<select name="engine"><option${selected('PostgreSQL',item.engine)}>PostgreSQL</option><option${selected('MySQL',item.engine)}>MySQL</option></select></label>
+       <div class="host-fields">${input('host','主机',{length:253})}${input('port','端口',{value:'5432',length:5})}</div>
+       <div class="host-fields">${input('database','数据库名')}${input('schema','模式（PostgreSQL）',{optional:true,hint:'public'})}</div>
+       ${input('table','可读取的表或视图')}${input('username','只读用户名')}${input('description','用途说明',{optional:true})}`}
+    ${input('secret',tool?'Bearer Token':model?'API Key':'数据库密码',{type:'password',optional:true,length:4000,hint:item.remoteConnection||item.kind?'留空沿用原凭据':'无鉴权服务可留空'})}
+    ${(item.remoteConnection||item.kind)?'<label class="check-row"><input name="clearSecret" type="checkbox"> 清除原有凭据</label>':''}
+    <p class="footnote">${tool?'保存时会读取服务目录。可以查看文本资源，也可以核对工具参数后发起调用。':model?'保存时会向该模型发送一条简短测试消息。设为默认后，对话、引用的资料和后台任务都会使用它。':'请使用只读账号。保存时会验证 TLS 并读取这张表的字段，查询结果可用于对话和后台任务。'} 凭据由服务器加密保存。</p>
+    <output role="status" class="connection-status"></output>
+    <footer class="dialog-footer">${button('取消','close')}<button class="button primary" type="submit">验证并保存</button></footer></form>`;
+}
+async function syncConnections(){
+  const {items}=await workspaceAPI('connections');
+  modelConnections=items.filter(item=>item.kind==='model');
+  const dbs=items.filter(item=>item.kind==='database');
+  const live=new Set(dbs.map(item=>item.id));
+  state.database=[...state.database.filter(item=>!item.remoteConnection&&!live.has(item.id)),...dbs.map(item=>({...item,remoteConnection:true,source:item.id}))];
+  const tools=items.filter(item=>item.kind==='tool'),ids=new Set(tools.map(item=>item.id));
+  state.tools=[...state.tools.filter(item=>!item.remoteConnection&&!ids.has(item.id)),...tools.map(item=>({...item,remoteConnection:true}))];
+  connectionCatalogError='';save();
+}
+async function activateModel(id){
+  await workspaceAPI('activateModel',{id:id==='platform'?'':id});
+  await syncConnections();
+  connection=await modelStatus();
+  render({bottom:false});
+}
+let mcpDirectory;
+let mcpResult;
+async function openMcp(id){
+  const item=byId('tools',id);
+  modal(item.name,'<p role="status">正在读取服务目录…</p>');
+  const ticket=mcpDirectory={id};
+  try{
+    const catalog=await workspaceAPI('mcp',{id,operation:'list'});
+    if(!dialog.open||mcpDirectory!==ticket)return;
+    Object.assign(ticket,catalog);
+    modal(item.name,`<h3>资源</h3>${catalog.resources.map((r,i)=>button(r.name||r.uri,'read-mcp',{id:String(i),glyph:'file-text'})).join(' ')||empty('服务没有列出资源')}
+    <h3>工具</h3>${catalog.tools.map((t,i)=>`<div class="connection-row"><div><strong>${escape(t.name)}</strong><small>${escape(t.description)}</small></div>${button('填写参数','prepare-mcp',{id:String(i)})}</div>`).join('')||empty('服务没有列出工具')}`);
+  }catch(error){if(dialog.open&&mcpDirectory===ticket)modal(item.name,`<p role="alert">${escape(error.message)}</p>`);}
+}
+async function runMcp(operation,params,label){
+  const directory=mcpDirectory;
+  modal(label,'<p role="status">等待 MCP 服务返回结果…</p>');
+  try{
+    const result=await workspaceAPI('mcp',{id:directory.id,operation,params});
+    if(!dialog.open||directory!==mcpDirectory)return;
+    mcpResult={name:label,text:result.text};
+    modal(result.isError?'工具返回错误':label,`<pre class="mcp-result">${escape(result.text)}</pre>${result.truncated?'<p>已显示前 12,000 字。</p>':''}<footer class="dialog-footer">${button('关闭','close')}${result.isError?'':button('整理为笔记','mcp-note')}</footer>`);
+  }catch(error){if(dialog.open&&directory===mcpDirectory)modal(label,`<p role="alert">${escape(error.message)}</p>`);}
+}
+function accountPanel(){
+  if(!account)return `<div class="panel account-panel"><div><h2>个人工作空间</h2><p>登录后可跨设备同步自己的内容，也可邀请同事共享。</p></div>${link('登录','login')}${link('创建账号','register','plus',true)}</div>`;
+  const space=account.spaces.find(x=>x.id===account.space);
+  return `<section class="panel account-panel"><div><h2>${escape(space?.name)}</h2><p>${escape(account.person.display)} · ${account.role==='admin'?'管理员':'成员'} · <span data-sync-status>${escape(syncController?.status||'正在连接')}</span></p></div>
+    ${button('立即同步','sync-now')}${button('团队与账号','account-options')}${syncController?.conflicts.length?button('处理冲突','sync-conflicts',{primary:true}):''}</section>`;
+}
+function teamPage(){
+  const members=teamDirectory?.members||[],invites=teamDirectory?.invites||[];
+  return `<div class="page">${heading('团队成员','管理这个工作空间的成员、权限和邀请。',account.role==='admin'?button('邀请成员','team-invite',{primary:true,glyph:'plus'}):'')}${accountPanel()}
+  <section class="panel connection-list"><h2>成员</h2>${members.map(m=>`<div class="connection-row"><div><strong>${escape(m.display)}</strong><small>${escape(m.login)}</small></div>${badge(m.role==='admin'?'管理员':'成员')}${account.role==='admin'&&m.role==='member'?button('移除','team-remove',{id:m.id}):''}</div>`).join('')||'<p>正在加载成员…</p>'}</section>
+  ${account.role==='admin'?`<section class="panel connection-list"><h2>邀请码</h2>${invites.map(i=>`<div class="connection-row"><div><strong>${escape(i.note||'团队邀请')}</strong><small>有效至 ${beijingTime(i.expires*1000,true)}</small></div>${badge(i.used===1?'已使用':i.used===2?'已撤销':i.expires*1000<Date.now()?'已过期':'待使用')}${!i.used&&i.expires*1000>Date.now()?button('撤销','team-revoke',{id:i.id}):''}</div>`).join('')||empty('还没有发出邀请')}</section>`:''}</div>`;
+}
+async function refreshTeam(){
+  if(!account)return;
+  teamDirectory=await workspaceAPI('members');if(page==='users'&&!dialog.open)render();
+}
+async function switchAccount(result,adopt=false){
+  const blobs=[];
+  if(adopt)for(const f of state.files.filter(f=>f.storedOffice)){
+    const blob=await getOfficeFile(f.id);if(blob)blobs.push({id:f.id,blob});
+  }
+  const {session,...info}=result;
+  if(!info.signedIn||!session)throw Error('没有取得登录会话');
+  const personal=info.spaces.find(sp=>sp.role==='admin');
+  if(adopt&&personal){localStorage.setItem(accountKey({...info,space:personal.id}),JSON.stringify(state));localStorage.removeItem(guestKey);localStorage.removeItem('workspace-task-owner');}
+  localStorage.setItem('workspace-account-info',JSON.stringify(info));
+  localStorage.setItem('workspace-account-session',session);
+  localStorage.setItem('workspace-office-scope','/'+info.space+'/'+info.person.id);
+  if(blobs.length&&personal)await putOfficeFiles(blobs,'/'+personal.id+'/'+info.person.id);
+  location.replace(location.pathname+location.search+'#home');location.reload();
+}
+function accountOptions(){
+  modal('团队与账号',`<p>${escape(account.person.login)}</p><div class="connection-row"><div><strong>切换工作空间</strong></div></div>${account.spaces.map(sp=>sp.id===account.space?badge(sp.name,'success'):button(sp.name,'switch-team',{id:sp.id})).join(' ')}
+  <form class="edit-form" data-form="join-team"><label>加入其他团队<input name="code" maxlength="120" placeholder="输入管理员发给你的邀请码" required></label><output role="status"></output><button class="button" type="submit">加入团队</button></form>
+  <footer class="dialog-footer">${button('修改密码','change-password')}${button('生成找回码','issue-recovery')}${button('退出登录','signout')}${button('关闭','close')}</footer>`);
+}
+async function beforeLeave(){
+  if(loading.size)throw Error('请等待当前任务完成');
+  if(syncController){await syncController.flush();if(syncController.conflicts.length)throw Error('请先处理同步冲突');}
 }
 function modelLabel() {
-  return connection.checking ? '检测模型中' : connection.available ? '模型已连接' : '模型连接异常';
+  return connection.checking ? '检测模型中' : connection.available ? (connection.verifiedAtSave?'保存时已验证':'模型已连接') : '模型连接异常';
 }
 function models() {
+  const active=modelConnections.find(item=>item.active);
   const samples=['case-weekly-doc','case-weekly-sheet','case-launch-deck'].map(id=>byId('files',id)).filter(Boolean);
-  return `<div class="page models-page">${heading('模型管理','查看实时连接，选择用模型完成哪种工作。',button('刷新连接状态','refresh-model',{glyph:'refresh-cw',disabled:connection.checking}))}
+  return `<div class="page models-page">${heading('模型管理','连接自己的模型，为对话、文档和后台任务选择默认服务。',button('添加模型','edit-model',{glyph:'plus',primary:true}))}
     <section class="model-connection panel"><span class="model-symbol">${icon('boxes')}</span><div><small>对话模型</small><h2>${escape(connection.available?connection.name:'实时模型')}</h2></div>
     ${badge(modelLabel(),connection.available?'success':connection.checking?'':'danger')}</section>
+    <section class="panel connection-list"><div class="view-heading"><h2>模型连接</h2>${button('检测当前模型','refresh-model',{glyph:'refresh-cw',disabled:connection.checking})}</div>
+    <div class="connection-row"><div><strong>平台模型</strong><small>工作台提供的默认服务</small></div>${active?button('设为默认','activate-model',{id:'platform'}):badge('当前默认','success')}</div>
+    ${modelConnections.map(item=>`<div class="connection-row"><div><strong>${escape(item.name)}</strong><small>${escape(item.model)} · ${escape(item.endpoint)}</small></div><div class="row-actions">${item.active?badge('当前默认','success'):button('设为默认','activate-model',{id:item.id})}${button('编辑','edit-model',{id:item.id})}${button('删除','remove-model',{id:item.id})}</div></div>`).join('')}
+    ${connectionCatalogError?`<p role="alert">${escape(connectionCatalogError)} ${button('重试','reload-connections')}</p>`:''}</section>
     <div class="model-paths">
       <a class="panel entry-link" href="#chat"><span class="tile-icon">${icon('messages-square')}</span><span><strong>发起对话</strong><small>引用资料，分析数据，生成可编辑文件。</small></span>${icon('arrow-up-right')}</a>
       <a class="panel entry-link" href="#tasks"><span class="tile-icon">${icon('clock')}</span><span><strong>安排定时任务</strong><small>设置执行时间，按计划生成结果。</small></span>${icon('arrow-up-right')}</a>
@@ -838,26 +949,26 @@ function models() {
   </div>`;
 }
 function users() {
-  const invites=state.invites;
-  return `<div class="page">${heading('用户管理','查看团队成员、角色和邀请码记录。',accountTab==='users'
-    ?button('添加成员','edit',{primary:true,glyph:'plus',extra:'data-collection="users"'})
-    :button('生成邀请码','create-invite',{primary:true,glyph:'plus'}))}
-    <div class="page-tabs" role="group" aria-label="用户管理视图">${[['users','用户'],['invites','邀请码']].map(([id,label])=>button(label,'account-tab',{id,extra:`aria-pressed="${accountTab===id}"`})).join('')}</div>
-    ${accountTab==='users'?`<section class="panel table"><div class="database-header"><h2>用户 · ${state.users.length} 人</h2></div>
-    <table class="responsive-table"><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${state.users.map(user=>`<tr><td data-label="用户名"><div class="member-identity"><span class="person-stamp" aria-hidden="true">${avatar(user.name||user.description||'成员')}</span><span><strong>${escape(user.description)}</strong><small>${escape(user.name)}</small></span></div></td><td data-label="角色">${badge(user.specialty)}</td><td data-label="状态">${badge('正常','success')}</td><td data-label="操作"><div class="row-actions">${button('编辑','edit',{id:user.id,extra:'data-collection="users"'})}${button('删除','delete',{id:user.id,extra:'data-collection="users"'})}</div></td></tr>`).join('')}</tbody></table></section>`:
-    `<section class="panel database-list"><div class="database-header"><h2>邀请码</h2><small>共 ${invites.length} 个</small></div>
-      ${invites.map(invite=>`<article class="database-record"><div class="database-info"><h3><code>${escape(invite.code)}</code></h3><p>${escape(invite.note)}</p></div>${badge(invite.status,invite.status==='未使用'?'success':'')}${invite.status==='未使用'?button('停用','disable-invite',{id:invite.id}):''}</article>`).join('')||empty('暂无邀请码记录')}</section>`}
-    <p class="footnote">成员和邀请码是演示记录，保存在当前浏览器。</p></div>`;
+  if(account)return teamPage();
+  return `<div class="page">${heading('团队成员','登录后可邀请同事，共享文件、知识笔记、会话和工作资源。')}${accountPanel()}</div>`;
 }
+async function savePreferences(text,enabled){
+  if(account){
+    try{const result=await workspaceAPI('setPrefs',{params:{rev:preferenceRev,preferences:text,enabled}});preferenceRev=result.rev;}
+    catch(e){toast(e.message);return;}
+  }
+  state.preferences=text;state.memoryEnabled=enabled;save();render();toast('偏好已保存');
+}
+
 function settings() {
   return `<div class="page">${heading('个人设置','管理对话偏好和工具配置。')}
-    <div class="page-tabs" role="group" aria-label="个人设置视图">${[['memory','记忆'],['mcp','MCP 工具']].map(([id,label])=>button(label,'personal-tab',{id,extra:`aria-pressed="${personalTab===id}"`})).join('')}</div>
+    ${accountPanel()}<div class="page-tabs" role="group" aria-label="个人设置视图">${[['memory','记忆'],['mcp','MCP 工具']].map(([id,label])=>button(label,'personal-tab',{id,extra:`aria-pressed="${personalTab===id}"`})).join('')}</div>
     ${personalTab==='memory'?`<section class="panel personal-panel"><div class="side-title"><h2>对话记忆</h2>${button(state.memoryEnabled?'已开启':'已关闭','memory-toggle',{extra:`aria-pressed="${state.memoryEnabled}"`})}</div><p>在此编辑会用于后续实时对话的偏好。</p>
       <form class="edit-form" data-form="memory"><label>表达与交付偏好<textarea name="preferences" rows="4" maxlength="800">${escape(state.preferences)}</textarea></label>
       <fieldset class="preference-examples"><legend>插入常用偏好</legend>${[['结论优先','先写结论，再列出支撑结论的事实。'],['标注来源','引用数据时注明来源、单位和统计周期。'],['明确分工','列出行动项时写清负责人和交付时间。']].map(([label,text])=>button(label,'insert-preference',{glyph:'plus',id:text})).join('')}</fieldset>
       <div class="row-actions"><button class="button primary" type="submit">保存偏好</button></div></form></section>`
     : `<section class="panel database-list tool-directory"><div class="database-header"><h2>MCP 服务器列表</h2>${button('新增','edit',{glyph:'plus',extra:'data-collection="tools"'})}</div>
-      ${state.tools.map(tool=>`<article class="database-record"><span class="tile-icon">${icon('workflow')}</span><div class="database-info"><h3>${escape(tool.name)}</h3><p>${escape(tool.description)}</p><code>${escape(tool.url)}</code></div>${button('编辑','edit',{id:tool.id,extra:'data-collection="tools"'})}${button('删除','delete',{id:tool.id,extra:'data-collection="tools"'})}</article>`).join('')||empty('暂无工具配置')}</section><p class="footnote">公开演示仅保存工具配置。</p>`}</div>`;
+      ${state.tools.map(tool=>`<article class="database-record"><span class="tile-icon">${icon('workflow')}</span><div class="database-info"><h3>${escape(tool.name)}</h3><p>${escape(tool.description)}</p><code>${escape(tool.url)}</code></div>${tool.remoteConnection?button('打开服务','open-mcp',{id:tool.id}):''}${button(tool.remoteConnection?'编辑':'连接','edit',{id:tool.id,extra:'data-collection="tools"'})}${button('删除','delete',{id:tool.id,extra:'data-collection="tools"'})}</article>`).join('')||empty('暂无工具配置')}</section><p class="footnote">连接自己的 MCP 服务后，可读取资源，并在确认参数后运行工具。</p>`}</div>`;
 }
 function systemSettings() {
   return `<div class="page system-page">${heading('系统设置','配置工作空间名称、应用标识和浏览器图标。')}
@@ -882,7 +993,6 @@ function authPreview(register) {
   const channelRows=(sheet?.rows||[]).filter(row=>row[0]!=='合计'&&typeof row[2]==='number');
   const largest=Math.max(1,...channelRows.map(row=>row[2]));
   const channelNames={'官网':'Website','平台旗舰店':'Flagship store','分销':'Distribution'};
-  const labels=register?[[t('用户名','Username'),'linchen'],[t('昵称（选填）','Display name (optional)'),t('林晨','Lin Chen')],[t('邀请码','Invite code'),'TEAM–A1'],[t('密码','Password'),'••••••••••••••'],[t('确认密码','Confirm password'),'••••••••••••••']]:[[t('用户名','Username'),'product'],[t('密码','Password'),'••••••••••••••']];
   return `<main class="auth-preview" id="workspace"><section class="auth-story">
     <a class="auth-logo" href="#home"><img src="${escape(brandImage('logo'))}" alt="${escape(brandName())}"></a>
     <div class="auth-copy"><p>${t('对话 · 协作 · 自动化','Chat · Collaboration · Automation')}</p><h1>${t('团队的 AI 工作空间','An AI workspace for teams')}</h1>
@@ -896,10 +1006,14 @@ function authPreview(register) {
     </div></section><section class="auth-form-side">
       <div class="auth-tools">${button(t('EN','中文'),'command-language',{extra:'aria-label="切换预览语言"'})}${themeControl()}</div>
       <div class="auth-form"><nav aria-label="${t('账号界面','Account screens')}"><a href="#login" aria-current="${register?'false':'page'}">${t('登录','Sign in')}</a><a href="#register" aria-current="${register?'page':'false'}">${t('注册','Register')}</a></nav>
-        <h2>${title}</h2><p>${register?t('填写账号信息，通过邀请码加入团队。','Use an invite code to join a team.'):t('登录账号，继续处理团队任务。','Sign in to continue your team’s work.')}</p>
-        <div class="auth-fields">${labels.map(([label,value])=>`<label>${label}<input readonly value="${escape(value)}"></label>`).join('')}</div>
-        <a class="button primary" href="#home">${t('进入公开演示','Open the public demo')}</a>
-        <p class="auth-note">${t('账号界面预览 · 演示可直接访问','Account preview · no account needed')}</p>
+        <h2>${title}</h2><p>${register?t('创建自己的工作空间，或使用邀请码加入团队。','Create a workspace, or join a team with an invite.'):t('登录账号，继续处理团队任务。','Sign in to continue your team’s work.')}</p>
+        <form class="auth-real-form" data-form="${register?'register':'login'}"><div class="auth-fields">
+          <label>${t('账号','Username')}<input name="login" autocomplete="username" required maxlength="64" placeholder="${t('输入账号','Username')}"></label>
+          ${register?`<label>${t('显示名称（选填）','Display name (optional)')}<input name="display" autocomplete="nickname" maxlength="40"></label>`:''}
+          <label>${t('密码','Password')}<input type="password" name="password" autocomplete="${register?'new-password':'current-password'}" required ${register?'minlength="10"':''} maxlength="180" placeholder="${register?t('至少 10 个字符','At least 10 characters'):''}"></label>
+          ${register?`<label>${t('确认密码','Confirm password')}<input type="password" name="again" autocomplete="new-password" required></label><label>${t('团队邀请码（选填）','Team invite (optional)')}<input name="invite" maxlength="120"></label>`:''}</div>
+          <output role="status" class="connection-status"></output><button type="submit" class="button primary">${register?t('创建账号','Create account'):t('登录','Sign in')}</button></form>
+        <p class="auth-note">${register?'':button(t('使用找回码','Recover account'),'recover-account')} <a href="#home">${t('直接试用工作台','Explore as a guest')}</a></p>
       </div></section></main>`;
 }
 const views = {home:dashboard,chat:chatView,projects,tasks,knowledge,files,database,models,settings,system:systemSettings,teams,users};
@@ -932,7 +1046,7 @@ function render({keepDraft = true, bottom = true} = {}) {
     <header class="topbar"><div class="topbar-left">${button('','menu',{glyph:'menu',title:'切换导航',extra:`aria-expanded="${mobileMenu}" aria-controls="navigation"`})}
       ${navCollapsed?button('','fold-nav',{glyph:'panel-left',title:'展开主导航'}):''}
       ${page==='chat'?`<a href="#home" class="mobile-logo"><img src="${escape(brandImage('logo'))}" alt="${escape(brandName())}"></a>`:''}<strong>${pageNames[page]}</strong></div>
-    <div class="topbar-right">${page==='chat'?'<span class="current-theme">'+(state.profile.theme==='dark'?'深色主题':'浅色主题')+'</span>':themeControl(true)}
+    <div class="topbar-right">${account?button(account.person.display,'account-options'):link('登录','login')}${page==='chat'?'<span class="current-theme">'+(state.profile.theme==='dark'?'深色主题':'浅色主题')+'</span>':themeControl(true)}
       ${page==='chat'?button(commandLanguage==='zh'?'中文':'EN','command-language',{extra:'aria-label="切换指令示例语言"'}):'<span class="workspace-language">中文</span>'}</div></header>
     <main id="workspace" tabindex="-1" class="workspace">${view()}</main></div>`;
   document.querySelector('.navigation').scrollTop = navScroll;
@@ -990,19 +1104,19 @@ function editForm(key,id) {
   const deleteAction=existing && ['projects','tasks'].includes(key) ? button('删除','delete',{id,extra:`data-collection="${key}"`}) : '';
   const footer=(extras='',save='保存')=>`<footer class="dialog-footer">${button('取消','close')}${extras}<button class="button primary" type="submit">${save}</button></footer>`;
   let content=controls.join('')+footer(deleteAction);
+  const choose=(field,label,collection)=>`<label>${label}<select name="${field}"><option value="">无</option>${state[collection].filter(row=>collection!=='files'||fileText(row)).map(row=>`<option value="${escape(row.id)}"${selected(row.id,item[field])}>${escape(row.name)}</option>`).join('')}</select></label>`;
+  if(key==='skills')content=controls.join('')+`<label>执行要求<textarea name="instructions" rows="5" maxlength="4000" placeholder="写下处理步骤、输出格式和需要核对的事项">${escape(item.instructions||'')}</textarea></label>`+footer();
+  if(key==='staff')content=controls.join('')+`<fieldset class="form-section"><legend>工作资源</legend>${state.skills.map(skill=>`<label class="check-row"><input type="checkbox" name="skills" value="${escape(skill.id)}"${item.skills?.includes(skill.id)?' checked':''}>${escape(skill.name)}</label>`).join('')}${choose('note','默认参考笔记','knowledge')}${choose('database','默认数据库','database')}</fieldset>`+footer();
+  if(key==='knowledge')content=(id?'':choose('importNote','从已有文件填入正文','files'))+controls.join('')+footer();
   if (key==='tasks') content=`<ol class="wizard-steps"><li>AI 自动化</li><li aria-current="step">配置任务</li><li>设定调度</li></ol>
     <section data-task-step="config"><h3>告诉助手要完成什么</h3><p>描述任务与交付要求，再选择负责执行的助手。</p>
-      <div class="form-section">${controls.slice(0,4).join('')}</div>
+      <div class="form-section">${controls.slice(0,4).join('')}${choose('skillId','执行技能','skills')}${choose('noteId','参考笔记','knowledge')}${choose('fileId','参考文件','files')}</div><p class="footnote">保存时会把所选资料的文字节选存入该后台计划。修改资料后，重新保存计划即可更新。</p>
       <footer class="dialog-footer">${button('取消','close')}${deleteAction}${button('设置调度','task-step',{id:'schedule',primary:true})}</footer></section>
     <section data-task-step="schedule" hidden><h3>安排执行时间</h3><p>保存到服务器后，即使关闭网页，也会按北京时间执行。</p>
-      <div class="form-section">${controls.slice(4).join('')}<label>查询演示数据库<select name="source"><option value="">无</option>${state.database.filter(db=>db.source).map(db=>`<option value="${db.source}"${selected(db.source,item.source)}>${escape(db.name)}</option>`).join('')}</select></label></div>
+      <div class="form-section">${controls.slice(4).join('')}<label>查询数据库<select name="source"><option value="">无</option>${state.database.filter(db=>db.source).map(db=>`<option value="${db.source}"${selected(db.source,item.source)}>${escape(db.name)}</option>`).join('')}</select></label></div>
       ${footer(button('上一步','task-step',{id:'config'}),'保存调度')}</section>`;
   if (key==='teams') content=controls.join('')+`<fieldset class="form-section"><legend>选择成员</legend>
     ${state.staff.map(person=>`<label class="check-row"><input type="checkbox" name="members" value="${person.id}"${item.members?.includes(person.id)?' checked':''}>${escape(person.name)}</label>`).join('')}</fieldset>`+footer();
-  if (key==='database') content=`
-    <fieldset class="form-section"><legend>基础信息</legend>${controls.slice(0,2).join('')}</fieldset>
-    <fieldset class="form-section"><legend>连接信息</legend>${controls[2]}<div class="host-fields">${controls.slice(3,5).join('')}</div>${controls[5]}</fieldset>
-    <p class="footnote">公开演示仅保存配置，真实连接和认证由工作空间的服务端管理。</p>${footer()}`;
   return `<form class="edit-form ${['tasks','database'].includes(key)?'':'editor-fields'}" data-form="edit" data-collection="${key}" data-id="${id||''}">${content}</form>`;
 }
 function modal(title, content, wide = false, position = '') {
@@ -1025,12 +1139,12 @@ function taskStep(form,step) {
   steps[step==='schedule'?2:1].setAttribute('aria-current','step');
   sections.find(section=>!section.hidden).querySelector('input,select')?.focus();
 }
-async function modelStatus() {
+async function modelStatus(verify=false) {
   try {
-    const response = await fetch(apiUrl('/api/model'),{cache:'no-store'});
+    const response = await fetch(apiUrl('/api/model'+(verify?'?verify=1':'')),{cache:'no-store',headers:{'X-Workspace':workspaceToken()}});
     if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) return {available:false};
     const info = await response.json();
-    return {available:info.available===true,name:String(info.name||'')};
+    return {available:info.available===true,name:String(info.name||''),verifiedAtSave:info.verifiedAtSave===true};
   } catch { return {available:false}; }
 }
 async function answer(messages, onProgress = () => {}) {
@@ -1057,7 +1171,7 @@ async function answer(messages, onProgress = () => {}) {
   let response;
   try {
     response=await fetch(apiUrl('/api/chat'),{
-      method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},
+      method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream','X-Workspace':workspaceToken()},
       signal:AbortSignal.timeout(175_000),body:JSON.stringify({messages:turns}),
     });
   } catch (error) {
@@ -1122,7 +1236,37 @@ async function answer(messages, onProgress = () => {}) {
   connection={available:true,name:result.model || connection.name};
   return {role:'assistant',text:result.text,mode:'live',model:result.model};
 }
+function needsExtraction(file){
+  return file&&!file.content&&(file.storedOffice||typeof file.data==='string')&&/\.(pdf|png|jpe?g|webp)$/i.test(file.name);
+}
+async function extractFile(file){
+  const blob=file.storedOffice?await getOfficeFile(file.id):null;
+  const url=blob?await readDataUrl(blob):file.data;
+  if(!url)throw Error('本机缺少文件原件，请先完成同步');
+  const {text,method}=await workspaceAPI('extractText',{params:{data:url.split(',')[1]}});
+  file.content=text;file.extraction=method;save();return text;
+}
+function referenceText(text,question){
+  const value=String(text||'');
+  if(value.length<=4000)return value;
+  const terms=new Set((question.toLowerCase().match(/[a-z0-9_]{2,}|[\u3400-\u9fff]{2,}/g)||[]).flatMap(t=>/^[\u3400-\u9fff]/.test(t)?Array.from({length:t.length-1},(_,i)=>t.slice(i,i+2)):[t]));
+  const sections=Array.from({length:Math.ceil(value.length/720)},(_,i)=>{
+    const part=value.slice(i*720,(i+1)*720),normalized=part.toLowerCase();
+    return {i,part,score:[...terms].filter(term=>normalized.includes(term)).length};
+  });
+  return sections.sort((a,b)=>b.score-a.score||a.i-b.i).slice(0,5).sort((a,b)=>a.i-b.i).map(s=>'【节选 '+(s.i+1)+'】'+s.part).join('\n');
+}
+let extractingForChat=false;
 async function send(prompt, existingId, replySource) {
+  if(extractingForChat)return;
+  const originRoute=page+'/'+routeDetail;
+  const toRead=filesForDraft().map(id=>byId('files',id)).filter(needsExtraction);
+  if(toRead.length){
+    extractingForChat=true;toast('正在提取所选 PDF 或图片中的文字…');
+    try{for(const file of toRead)await extractFile(file);}
+    catch(e){toast(e.message);return;}finally{extractingForChat=false;}
+    if(page+'/'+routeDetail!==originRoute)return;
+  }
   const chat = byId('chats',existingId);
   if (chat && loading.has(chat.id)) return;
   const target = chat || {id:uid(),title:prompt.slice(0,30),messages:[]};
@@ -1135,7 +1279,7 @@ async function send(prompt, existingId, replySource) {
   const at=new Date().toISOString();
   const attachments=filesForDraft().filter(id=>byId('files',id));
   const resource=(kind,item,text) => item && {
-    kind,name:item.name.slice(0,160),text:String(text??'').length>4000?String(text).slice(0,3970)+'\n（仅附前段节选）':String(text??''),
+    kind,name:item.name.slice(0,160),text:referenceText(text,prompt),
   };
   const resources = [
     resource('staff',person,person?.description),
@@ -1213,7 +1357,8 @@ async function runTask(task) {
   try {
     const staff = byId('staff',task.assignee);
     const resources=staff?[{kind:'staff',name:staff.name.slice(0,160),text:(staff.description||'').slice(0,4000)}]:[];
-    if(task.source)resources.push({kind:'database',source:task.source,name:'演示业务库',text:''});
+    resources.push(...(task.references||[]));
+    if(task.source)resources.push({kind:'database',source:task.source,name:'任务数据源',text:''});
     const result = await answer([{role:'user',text:task.description||task.name,resources}]);
     run={status:'success',mode:result.mode,text:result.text,files:result.files,logs:result.steps||[]};
   } catch (error) { run={status:'failed',text:error.message,logs:['读取任务指令','模型调用未完成']}; }
@@ -1317,7 +1462,7 @@ async function fetchScheduledFile(file){
 }
 async function preview(file, chosenSheet = 0) {
   if (!file || !await fetchScheduledFile(file)) return;
-  const footer=`<footer class="dialog-footer file-preview-actions">${previewParent?button(previewParent.label,'close',{glyph:'arrow-left'}):''}${button('下载文件','download',{id:file.id,glyph:'download'})}${file.sections||file.content?button('引用到对话','ask-file',{id:file.id,primary:true,glyph:'messages-square'}):''}</footer>`;
+  const footer=`<footer class="dialog-footer file-preview-actions">${previewParent?button(previewParent.label,'close',{glyph:'arrow-left'}):''}${button('下载文件','download',{id:file.id,glyph:'download'})}${file.sections||file.content||needsExtraction(file)?button('引用到对话','ask-file',{id:file.id,primary:true,glyph:'messages-square'}):''}</footer>`;
   dialog.dataset.file=file.id;
   if (file.sections) {
     if (file.asset==='launch-brief.pptx') {
@@ -1333,12 +1478,15 @@ async function preview(file, chosenSheet = 0) {
     modal(file.name,body+footer,true);
     return;
   }
+  const imageBlob=file.type==='图片'&&file.storedOffice?await getOfficeFile(file.id):null;
+  const imageURL=imageBlob?await readDataUrl(imageBlob):file.data;
   const text = file.content ? (/\.md$/i.test(file.name) || file.mime==='text/markdown'
     ? `<div class="formatted-text">${renderMarkdown(file.content)}</div>`
     : `<pre class="preview-text">${escape(file.content)}</pre>`)
-    : file.type==='图片' ? `<img class="preview-image" src="${escape(file.data)}" alt="${escape(file.name)}">`
+    : file.type==='图片' ? `<img class="preview-image" src="${escape(/^data:image\/(png|jpeg|webp);base64,/i.test(imageURL)?imageURL:'')}" alt="${escape(file.name)}">`
     : '<p>可以下载此文件，在本地应用中打开。</p>';
-  modal(file.name,text+footer);
+  const extraction=needsExtraction(file)?`<p class="footnote">服务器可临时读取这份文件，提取中文和英文文字。图片内容以识别出的文字引用。</p>${button('提取文字','extract-text',{id:file.id})}`:'';
+  modal(file.name,text+extraction+footer);
 }
 async function download(file) {
   if (!file || !await fetchScheduledFile(file)) return;
@@ -1348,7 +1496,7 @@ async function download(file) {
     try {storedBlob=await getOfficeFile(file.id);} catch {}
     if(!storedBlob){toast('此浏览器缺少文件内容，请在原对话重新生成。');return;}
   }
-  const url = storedBlob ? URL.createObjectURL(storedBlob) : storedAsset ? 'assets/deliverables/'+storedAsset : file.data || URL.createObjectURL(new Blob([file.content],{type:file.mime}));
+  const url = storedBlob ? URL.createObjectURL(storedBlob) : storedAsset ? 'assets/deliverables/'+storedAsset : (typeof file.data==='string'&&/^data:[^,;]*;base64,[a-z0-9+/=]+$/i.test(file.data)?file.data:'') || URL.createObjectURL(new Blob([file.content],{type:file.mime}));
   const anchor = Object.assign(document.createElement('a'),{href:url,download:file.name});
   anchor.click();
   if (url.startsWith('blob:')) setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -1396,12 +1544,20 @@ async function previewBrandAsset(input) {
 }
 async function upload(file, target, forChat) {
   const attachmentRoute=page+'/'+routeDetail;
-  if (file.size>750_000) {toast('此演示支持上传 750 KB 以内的文件。');return;}
+  if(!file.size||file.size>4_000_000){toast('请选择非空且不超过 4 MB 的文件');return;}
   const suffix = file.name.toLowerCase().split('.').at(-1);
   const text = ['md','csv','txt'].includes(suffix);
   const type = ['csv','xlsx'].includes(suffix) ? '表格' : ['png','jpg','jpeg','webp'].includes(suffix)?'图片': ['txt','md','pdf','docx'].includes(suffix)?'文档':'其他';
-  const item = {id:uid(),name:file.name,type,mime:file.type,size:file.size,at:new Date().toISOString(),content:text ? await file.text() : null};
-  if (!text) item.data = await readDataUrl(file);
+  const item = {id:uid(),name:file.name,type,mime:file.type,size:file.size,at:new Date().toISOString(),storedOffice:true,content:text ? (await file.text()).slice(0,24000) : null};
+  if(type==='图片'){
+    try{
+      const bitmap=await createImageBitmap(file),scale=Math.min(1,180/Math.max(bitmap.width,bitmap.height));
+      const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+      canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
+      item.thumbnail=canvas.toDataURL('image/webp',.72);
+    }catch{}
+  }
+  await putOfficeFiles([{id:item.id,blob:file}]);
   if(['docx','xlsx','pptx'].includes(suffix)){
     try {item.content=await readOfficeUpload(file,suffix);} catch {}
     if(suffix==='pptx')item.type='幻灯片';
@@ -1416,7 +1572,7 @@ async function upload(file, target, forChat) {
   }
   if (target==='space') chat.attachments=[...(chat.attachments||[]),item.id];
   if (!save()) {
-    state.files.shift();
+    state.files=state.files.filter(f=>f.id!==item.id);await removeOfficeFile(item.id);
     if (newChat) state.chats.shift();
     else if (target==='space') chat.attachments.pop();
     return;
@@ -1527,6 +1683,9 @@ document.addEventListener('click',async event=>{
       picker=id;render({bottom:false});document.querySelector('.resource-picker input').focus();break;
     case 'resource-close': picker='';render({bottom:false});break;
     case 'resource-pick': {
+      if(picker==='models'){
+        try{await activateModel(id);}catch(error){toast(error.message);break;}
+      }
       if (picker==='skills') selectedSkill=id;
       if (picker==='knowledge') selectedNote=id;
       if (picker==='database') selectedDatabase=id;
@@ -1554,7 +1713,7 @@ document.addEventListener('click',async event=>{
       activeChat=undefined;
       draftAttachments.delete('chat/');drafts.delete('chat/');
       selectedSkill=person.skills?.find(skill=>byId('skills',skill))||'';
-      selectedNote='';
+      selectedNote=person.note||'';
       selectedDatabase=person.database||'';
       go('chat',{keepDraft:page!=='chat'||Boolean(routeDetail)});document.querySelector('#message')?.focus();
       break;
@@ -1596,24 +1755,73 @@ document.addEventListener('click',async event=>{
     case 'schedule-day': scheduleDay=Number(id);render({bottom:false});break;
     case 'task-by-type': taskTag=id;taskSearch='';taskStatus='all';go('tasks');break;
     case 'query-db': {
-      const item=byId('database',id),db=databases[item.source];
+      const item=byId('database',id),quote=item.engine==='MySQL'?String.fromCharCode(96):'"';
+      const quoted=quote+String(item.table).replaceAll(quote,quote+quote)+quote;
+      const db=databases[item.source]||{schema:(item.columns||[]).map(c=>c.join(' ')).join(' · '),sql:'SELECT * FROM '+quoted+' LIMIT 20'};
       modal(item.name,'<form class="edit-form" data-form="db-query" data-source="'+item.source+'"><p>'+escape(db.schema)+'</p><label>只读 SQL<textarea name="sql" rows="4" maxlength="1800" required>'+escape(db.sql)+'</textarea></label><button class="button primary" type="submit">运行查询</button><output aria-live="polite"></output></form>',true);
       dialog.querySelector('form').requestSubmit();break;
     }
-    case 'check-db': {
-      const item=byId('database',id);
-      const port=Number(item.port);
-      toast(item.host&&item.database&&Number.isInteger(port)&&port>0&&port<=65535?'配置字段齐全，等待正式环境连接验证。':'请核对主机、端口和数据库名称。');
-      break;
-    }
-    case 'account-tab': accountTab=id;render();break;
     case 'personal-tab': personalTab=id;render();break;
-    case 'memory-toggle': state.memoryEnabled=!state.memoryEnabled;save();render();break;
-    case 'create-invite':
-      modal('生成邀请码',`<form class="edit-form" data-form="invite"><label>用途备注<input name="note" maxlength="120" required></label><div class="dialog-footer">${button('取消','close')}<button class="button primary" type="submit">生成</button></div></form>`);
-      break;
-    case 'disable-invite': byId('invites',id).status='已停用';save();render();break;
-    case 'edit': modal(id ? '编辑'+formTitles[key] : collections[key]?.[2] || '新建'+formTitles[key],editForm(key,id));break;
+    case 'memory-toggle': await savePreferences(state.preferences,!state.memoryEnabled);break;
+
+    case 'change-password': case 'issue-recovery': case 'recover-account':{
+      const recovery=action==='recover-account',issue=action==='issue-recovery';
+      modal(issue?'生成一次性找回码':recovery?'找回账号':'修改密码',`<form class="edit-form" data-form="account-security" data-operation="${issue?'issueRecovery':recovery?'recover':'changePassword'}">
+      ${recovery?'<label>账号<input name="login" autocomplete="username" required></label><label>找回码<input name="code" required></label>':'<label>当前密码<input name="current" type="password" autocomplete="current-password" required></label>'}
+      ${issue?'<p>新码生成后，旧码即失效。请将新码保存在自己的密码管理器中。</p>':'<label>新密码<input name="password" type="password" minlength="10" maxlength="180" required autocomplete="new-password"></label>'}
+      <output role="status"></output><button type="submit" class="button primary">${issue?'生成找回码':'更新密码'}</button></form>`);break;
+    }
+    case 'account-options':accountOptions();break;
+    case 'sync-now':try{await syncController.flush();render();toast(syncController.status);}catch(e){toast(e.message);}break;
+    case 'sync-conflicts':{
+      const names={chats:'会话',files:'文件',office:'文件内容',knowledge:'笔记',staff:'员工',teams:'团队',skills:'技能',projects:'项目',tasks:'任务',settings:'设置'};
+      modal('处理同步冲突',`<p>同一条内容在两台设备上都被修改。请选择要保留的版本。</p>${syncController.conflicts.map(key=>{const [group,id]=key.split('/');const record=state[group]?.find?.(r=>r.id===id);return `<div class="connection-row"><strong>${escape(record?.name||record?.title||names[group])}</strong>${button('保留本机','sync-local',{id:key})}${button('使用云端','sync-remote',{id:key})}</div>`;}).join('')}`);break;
+    }
+    case 'sync-local':case 'sync-remote':try{await syncController.flush({[id]:action==='sync-local'?'local':'remote'});dialog.close();render();toast(syncController.status);}catch(e){toast(e.message);}break;
+    case 'team-invite':modal('邀请成员',`<form class="edit-form" data-form="team-invite"><label>邀请备注<input name="note" maxlength="120"></label><p>邀请码可使用一次，7 天内有效。对方可在注册时填写，已有账号可从「团队与账号」加入。</p><output role="status"></output><button type="submit" class="button primary">生成邀请码</button></form>`);break;
+    case 'team-revoke':try{await workspaceAPI('revokeInvite',{params:{id}});await refreshTeam();}catch(e){toast(e.message);}break;
+    case 'team-remove':modal('移除团队成员',`<p>移除后，该成员将失去这个工作空间的访问权限。</p><footer class="dialog-footer">${button('取消','close')}${button('确认移除','team-remove-confirm',{id})}</footer>`);break;
+    case 'team-remove-confirm':try{await workspaceAPI('removeMember',{params:{id}});dialog.close();await refreshTeam();}catch(e){toast(e.message);}break;
+    case 'switch-team':try{await beforeLeave();await switchAccount(await workspaceAPI('switchTeam',{params:{space:id}}));}catch(e){toast(e.message);}break;
+    case 'signout':try{
+      await beforeLeave();await workspaceAPI('logout');await removeOfficeFile();
+      localStorage.removeItem(storageKey);localStorage.removeItem(storageKey+'/sync-index');
+      for(const key of ['workspace-account-info','workspace-account-session','workspace-office-scope'])localStorage.removeItem(key);
+      location.replace(location.pathname+location.search+'#login');location.reload();
+    }catch(e){toast(e.message);}break;
+    case 'extract-text':{
+      const file=byId('files',id);control.disabled=true;
+      try{await extractFile(file);await preview(file);toast('文字已提取，可在笔记、对话和任务中引用');}catch(e){toast(e.message);control.disabled=false;}break;
+    }
+    case 'open-mcp': await openMcp(id);break;
+    case 'read-mcp': {const r=mcpDirectory.resources[Number(id)];await runMcp('read',{uri:r.uri},r.name||r.uri);break;}
+    case 'prepare-mcp': {
+      const t=mcpDirectory.tools[Number(id)];
+      modal(t.name,`<p>${escape(t.description)}</p><details><summary>参数格式</summary><pre class="mcp-result">${escape(JSON.stringify(t.inputSchema,null,2))}</pre></details>
+      <form class="edit-form" data-form="run-mcp" data-index="${Number(id)}"><label>参数（JSON 对象）<textarea name="args" rows="5" maxlength="8000" required>{}</textarea></label><p>确认后，远端服务会执行该工具定义的操作。</p><output role="status"></output><footer class="dialog-footer">${button('取消','close')}<button type="submit" class="button primary">确认调用</button></footer></form>`);break;
+    }
+    case 'mcp-note':{
+      modal('整理为笔记',editForm('knowledge'));
+      const fields=dialog.querySelector('form').elements;
+      fields.name.value=mcpResult.name;fields.description.value='MCP 资源';fields.body.value=mcpResult.text.slice(0,4000);break;
+    }
+    case 'import-csv': {
+      const db=byId('database',id);
+      modal(db?'替换表数据':'导入自己的 CSV',`<form data-form="connection" data-kind="database" data-id="${id||''}" class="edit-form"><input type="hidden" name="engine" value="CSV">
+        <label>数据源名称<input name="name" required maxlength="80" value="${escape(db?.name||'')}"></label>
+        <label>CSV 文件<input name="csvFile" type="file" accept=".csv,text/csv" required></label>
+        <p class="footnote">使用带表头的 UTF-8 CSV，最多 64 KB、500 行。数据会加密保存到当前工作空间，可用于只读查询、对话和后台任务。</p>
+        <output role="status" class="connection-status"></output><footer class="dialog-footer">${button('取消','close')}<button type="submit" class="button primary">导入数据</button></footer></form>`);break;
+    }
+    case 'edit-model': modal(id?'编辑模型连接':'添加模型连接',connectionForm('model',modelConnections.find(item=>item.id===id)));break;
+    case 'activate-model': try{await activateModel(id);toast('默认模型已更新');}catch(error){toast(error.message);}break;
+    case 'reload-connections': try{await syncConnections();render();}catch(error){toast(error.message);}break;
+    case 'remove-model': {
+      const item=modelConnections.find(item=>item.id===id);
+      modal('删除模型连接',`<p>确定删除「${escape(item.name)}」及其凭据？删除后不可恢复。${item.active?'后续请求将使用平台模型。':''}</p><footer class="dialog-footer">${button('取消','close')}${button('确认删除','confirm-remove-model',{id})}</footer>`);break;
+    }
+    case 'confirm-remove-model': try{await workspaceAPI('removeConnection',{id});await syncConnections();connection=await modelStatus();dialog.close();render();}catch(error){toast(error.message);}break;
+    case 'edit': if(key==='tools'){modal(id?'配置 MCP 服务':'连接 MCP 服务',connectionForm('tool',byId(key,id)));break;}if(key==='database'){modal(id?'编辑数据库连接':'新增数据库连接',connectionForm('database',byId(key,id)));break;}modal(id ? '编辑'+formTitles[key] : collections[key]?.[2] || '新建'+formTitles[key],editForm(key,id));break;
     case 'close': if (!restorePreviewParent()) dialog.close();break;
     case 'delete': {
       const item = byId(key,id);
@@ -1621,6 +1829,9 @@ document.addEventListener('click',async event=>{
       break;
     }
     case 'confirm-delete': {
+      if(['database','tools'].includes(key)&&byId(key,id)?.remoteConnection){
+        try{await workspaceAPI('removeConnection',{id});}catch(error){toast(error.message);break;}
+      }
       if(key==='tasks' && byId(key,id)?.scheduled){
         try {await workspaceAPI('remove',{id});}catch(error){toast(error.message);break;}
       }
@@ -1688,10 +1899,10 @@ document.addEventListener('click',async event=>{
     case 'task-step': taskStep(control.closest('form'),id);break;
     case 'refresh-model':
       connection.checking=true;render();
-      connection=await modelStatus();
+      connection=await modelStatus(true);
       if(page==='models'){render();toast(modelLabel());}
       break;
-    case 'reset': modal('恢复示例数据',`<p>当前浏览器中的编辑和上传会被替换为初始示例。</p><footer class="dialog-footer">${button('取消','close')}${button('确认恢复','confirm-reset',{primary:true})}</footer>`);break;
+    case 'reset': if(account){toast('已登录的共享工作空间请逐项管理数据');break;}modal('恢复示例数据',`<p>当前浏览器中的编辑和上传会被替换为初始示例。</p><footer class="dialog-footer">${button('取消','close')}${button('确认恢复','confirm-reset',{primary:true})}</footer>`);break;
     case 'confirm-reset': drafts.clear();draftAttachments.clear();caseFilter='all';fileQuery='';homeTab='cases';state=load(true);activeChat=state.chats[0]?.id;activeNote=state.knowledge[0]?.id;if(save())await removeOfficeFile().catch(()=>{});dialog.close();render();break;
   }
   if (['file-case','library-layout','schedule-day','overview-stage','task-view','project-tab'].includes(action)) {
@@ -1702,10 +1913,10 @@ document.addEventListener('click',async event=>{
 document.addEventListener('submit',async event=>{
   const form=event.target;
   if(form.dataset.form==='db-query'){
-    event.preventDefault();const field=form.querySelector('output');field.textContent='正在查询…';
+    event.preventDefault();const field=form.querySelector('output'),seq=String(Number(form.dataset.querySeq||0)+1);form.dataset.querySeq=seq;field.textContent='正在查询…';
     try {const r=await workspaceAPI('query',{source:form.dataset.source,sql:form.elements.sql.value});
-      field.innerHTML='<p>'+r.rows.length+' 行'+(r.truncated?' · 仅展示前 50 行':'')+'</p>'+dataTable(r.columns,r.rows);
-    }catch(e){field.textContent=e.message;}return;
+      if(form.dataset.querySeq!==seq)return;field.innerHTML='<p>'+r.rows.length+' 行'+(r.truncated?' · 仅展示前 50 行':'')+'</p>'+dataTable(r.columns,r.rows);
+    }catch(e){if(form.dataset.querySeq===seq)field.textContent=e.message;}return;
   }
   if(!form.dataset.form)return;
   event.preventDefault();
@@ -1713,11 +1924,55 @@ document.addEventListener('submit',async event=>{
   if (form.dataset.form==='chat' || form.dataset.form==='home') {
     const prompt=values.prompt?.trim();
     if(prompt) void send(prompt,form.dataset.form==='chat'?activeChat:undefined);
+  } else if(form.dataset.form==='account-security'){
+    try{const result=await workspaceAPI(form.dataset.operation,{params:values});
+      if(result.code)modal('一次性找回码',`<p>请妥善保存，关闭后无法再次查看。</p><input aria-label="找回码" readonly value="${escape(result.code)}">${button('完成','close')}`);
+      else{dialog.close();toast('密码已更新');}
+    }catch(e){form.querySelector('output').textContent=e.message;}
+  } else if(['login','register','team-invite','join-team'].includes(form.dataset.form)){
+    const action=form.dataset.form,status=form.querySelector('output'),submit=form.querySelector('[type=submit]');
+    if(submit.disabled)return;submit.disabled=true;
+    try{
+      if(action==='register'&&values.again!==values.password)throw Error('两次输入的密码不一致');
+      if(action==='login'||action==='register'){
+        status.textContent='正在连接…';
+        const {login,password,display,invite}=values;
+        const result=await workspaceAPI(action,{params:{login,password,display,invite}});
+        await switchAccount(result,action==='register');
+      }else if(action==='join-team'){await beforeLeave();await switchAccount(await workspaceAPI('joinTeam',{params:{code:values.code}}));}
+      else{
+        const {code}=await workspaceAPI('invite',{params:{note:values.note}});
+        modal('团队邀请码',`<p>把这个一次性邀请码交给要加入的成员。</p><label class="edit-form">邀请码<input readonly value="${escape(code)}" aria-label="团队邀请码"></label><footer class="dialog-footer">${button('完成','close')}</footer>`);
+        await refreshTeam();render();
+      }
+    }catch(e){status.textContent=e.message;}finally{submit.disabled=false;}
+  } else if(form.dataset.form==='run-mcp'){
+    const tool=mcpDirectory.tools[Number(form.dataset.index)];
+    try{
+      const args=JSON.parse(values.args);
+      if(!args||typeof args!=='object'||Array.isArray(args))throw Error();
+      await runMcp('call',{name:tool.name,arguments:args},tool.name);
+    }catch{form.querySelector('output').textContent='请输入有效的 JSON 对象';}
+  } else if(form.dataset.form==='connection'){
+    if(form.dataset.saving)return;
+    const submit=form.querySelector('[type=submit]'),status=form.querySelector('output');
+    form.dataset.saving='true';submit.disabled=true;status.textContent='正在验证连接…';
+    const config={...values,kind:form.dataset.kind,id:form.dataset.id||uid()};
+    form.dataset.id=config.id;
+    try{
+      if(config.csvFile){
+        if(config.csvFile.size>64000)throw Error('CSV 最大为 64 KB');
+        config.csv=await config.csvFile.text();delete config.csvFile;
+      }
+      await workspaceAPI('saveConnection',{config});
+      await syncConnections();
+      if(form.isConnected){dialog.close();render();toast(config.kind==='model'?'模型已验证，可设为默认':config.kind==='tool'?'MCP 服务已连接':'数据库已连接');}
+    }catch(error){status.textContent=error.message;}
+    finally{delete form.dataset.saving;submit.disabled=false;}
   } else if (form.dataset.form==='system') {
     void saveSystemSettings(values).catch(()=>toast('图标读取失败，请重新选择'));
   } else if (form.dataset.form==='memory') {
-    state.preferences=values.preferences.trim();
-    save();render();toast('偏好已保存');
+    await savePreferences(values.preferences.trim(),state.memoryEnabled);
   } else if (form.dataset.form==='invite') {
     const note=values.note.trim();
     if(!note)return;
@@ -1741,14 +1996,18 @@ document.addEventListener('submit',async event=>{
     if (key==='tasks') {
       if(form.dataset.saving)return;
       record.enabled=values.enabled==='已启用';record.runs=existing?.runs||[];
-      const {id,name,time,tag,description,frequency,enabled,assignee,source}=record;
+      const {id,name,time,tag,description,frequency,enabled,assignee,source,skillId,noteId,fileId}=record;
+      const refs=[['skill',byId('skills',skillId)],['knowledge',byId('knowledge',noteId)],['attachment',byId('files',fileId)]];
+      record.references=refs.filter(([,item])=>item).map(([kind,item])=>({kind,name:item.name.slice(0,160),text:String(kind==='attachment'?fileText(item):item.body||item.instructions||item.description||'').slice(0,3000)}));
       form.dataset.saving='true';
       try {
         const instructions=(byId('staff',assignee)?.description||'').slice(0,700);
-        const saved=await workspaceAPI('save',{task:{id,name,time,tag,description,frequency,enabled,assignee,source,instructions}});
+        const saved=await workspaceAPI('save',{task:{id,name,time,tag,description,frequency,enabled,assignee,source,instructions,skillId,noteId,fileId,references:record.references}});
         record.scheduled=true;record.next=saved.next;
       } catch(error){toast(error.message);return;}finally{delete form.dataset.saving;}
     }
+    if(key==='staff'){record.skills=new FormData(form).getAll('skills');record.vault=Boolean(record.note);}
+    if(key==='knowledge')delete record.importNote;
     if (key==='teams') record.members=new FormData(form).getAll('members');
     if(existing) Object.assign(existing,record);
     else state[key].unshift(record);
@@ -1789,7 +2048,11 @@ document.addEventListener('change',event=>{
     else taskTag=target.value;
     document.querySelector('#task-rows').innerHTML=taskRows();
   }
-  if(target.name==='engine'&&target.form?.dataset.collection==='database'){
+  if(target.name==='importNote'&&target.value){
+    const file=byId('files',target.value),form=target.form;
+    if(file){form.elements.body.value=fileText(file).slice(0,4000);if(!form.elements.name.value)form.elements.name.value=file.name;if(!form.elements.description.value)form.elements.description.value='文件资料';}
+  }
+  if(target.name==='engine'&&target.form?.dataset.kind==='database'){
     const port=target.form.elements.port;
     if(['','3306','5432'].includes(port.value))port.value=target.value==='MySQL'?'3306':'5432';
   }
@@ -1815,19 +2078,45 @@ document.addEventListener('keydown',event=>{
     event.target.form.requestSubmit();
   }
 });
+window.addEventListener('storage',event=>{if(event.key==='workspace-account-session')location.reload();});
+document.addEventListener('focusout',()=>{if(syncNeedsRender)setTimeout(()=>{if(!dialog.open&&!loading.size&&!document.activeElement?.matches('input,textarea,select')){syncNeedsRender=false;render({bottom:false});}},0);});
 window.addEventListener('hashchange',()=>{
   picker='';themeMenu=false;spaceMenu='';
   const [key,detail='']=location.hash.slice(1).split('/');
   if ((key||'home')!==page || detail!==routeDetail) render();
+  if(key==='tasks')void refreshSchedule();
+  if(key==='users'&&account)refreshTeam().catch(e=>toast(e.message));
 });
 window.addEventListener('resize',paintCharts);
+async function boot(){
+  if(account){
+    try{
+      account=await workspaceAPI('account');if(!account.signedIn)throw Error('请登录');
+      const pref=await workspaceAPI('getPrefs');preferenceRev=pref.rev;
+      if(pref.value){state.preferences=pref.value.preferences;state.memoryEnabled=pref.value.enabled;}
+      syncController=teamSync({scope:storageKey,read:()=>state,persist:()=>{try{localStorage.setItem(storageKey,JSON.stringify(state));return true;}catch{return false;}},
+        canApply:()=>!dialog.open&&!loading.size&&!document.activeElement?.matches('input,textarea,select'),
+        notify:()=>{if(!dialog.open&&!loading.size&&!document.activeElement?.matches('input,textarea,select'))render({bottom:false});else syncNeedsRender=true;}});
+      await syncController.flush();
+      if(location.hash==='#users')await refreshTeam();
+    }catch(e){
+      if(/过期|请登录|访问权限/.test(e.message)){
+        for(const key of ['workspace-account-session','workspace-account-info','workspace-office-scope'])localStorage.removeItem(key);
+        location.replace(location.pathname+location.search+'#login');location.reload();return;
+      }
+      toast('同步暂时不可用：'+e.message);
+    }
+  }
 render();
+void syncConnections().then(()=>{if(['models','database','settings'].includes(page)&&!dialog.open)render({bottom:false});}).catch(()=>{connectionCatalogError='暂时无法载入已保存的连接';if(page==='models'&&!dialog.open)render({bottom:false});});
 void modelStatus().then(result=>{
   if (!connection.checking) return;
   connection=result;
   if (page==='models'||picker==='models') render({bottom:false});
 });
 
+}
+void boot();
 let refreshingSchedule=false;
 async function refreshSchedule(){
   if(refreshingSchedule || document.hidden || page!=='tasks')return;
@@ -1850,6 +2139,8 @@ async function refreshSchedule(){
   }catch(error){if(page==='tasks' && !dialog.open){const note=document.querySelector('.tasks-page .footnote');if(note)note.textContent='暂时无法刷新服务器执行记录。';}}
   finally{refreshingSchedule=false;}
 }
+window.addEventListener('storage',event=>{if(event.key==='workspace-account-session')location.reload();});
+document.addEventListener('focusout',()=>{if(syncNeedsRender)setTimeout(()=>{if(!dialog.open&&!loading.size&&!document.activeElement?.matches('input,textarea,select')){syncNeedsRender=false;render({bottom:false});}},0);});
 window.addEventListener('hashchange',refreshSchedule);
 document.addEventListener('visibilitychange',refreshSchedule);
 setInterval(refreshSchedule,15000);

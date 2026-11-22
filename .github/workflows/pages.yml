@@ -27,7 +27,8 @@ jobs:
           if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ('','/') or parsed.query or parsed.fragment:
               raise SystemExit('Set PUBLIC_API_ORIGIN to the public HTTPS API origin.')
           page = Path('dist/index.html')
-          page.write_text(page.read_text().replace('</head>', '<meta name="workspace-api-origin" content="'+escape(origin, quote=True)+'">\n</head>'))
+          policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' "+origin+"; object-src 'none'; base-uri 'none'; form-action 'self'"
+          page.write_text(page.read_text().replace('</head>', '<meta http-equiv="Content-Security-Policy" content="'+escape(policy, quote=True)+'">\n<meta name="workspace-api-origin" content="'+escape(origin, quote=True)+'">\n</head>'))
           PY
       - uses: actions/upload-pages-artifact@v5
         with:
