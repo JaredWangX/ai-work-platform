@@ -5,6 +5,7 @@ const assets = {
   '/workspace-motion.mjs':['workspace-motion.mjs','text/javascript; charset=utf-8'],
   '/vendor/gsap.min.js':['vendor/gsap.min.js','text/javascript; charset=utf-8'],
   '/workspace.css':['workspace.css','text/css; charset=utf-8'],
+  '/api.mjs':['api.mjs','text/javascript; charset=utf-8'],
   '/app.js':['app.js','text/javascript; charset=utf-8'],
   '/showcase.js':['showcase.js','text/javascript; charset=utf-8'],
   '/workspace-client.mjs':['workspace-client.mjs','text/javascript; charset=utf-8'],

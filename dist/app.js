@@ -1,3 +1,4 @@
+import {apiUrl} from './api.mjs';
 import {databases,workspaceAPI} from './workspace-client.mjs';
 import { putOfficeFiles, getOfficeFile, removeOfficeFile, readOfficeUpload } from './office-files.mjs';
 import { refreshWorkspaceMotion, animateEditor } from './workspace-motion.mjs';
@@ -216,7 +217,7 @@ function dossierCover(example) {
   if (example.id==='operations' && source) {
     face=`<span class="folio-sheet"><b>${escape(file.title)}</b>${source.rows.slice(0,3).map(row=>`<span><i>${escape(row[0])}</i><strong>${escape(row[2])}</strong></span>`).join('')}</span>`;
   } else if (example.id==='launch' && byId('files','case-launch-deck')) {
-    face='<img class="folio-slide" src="/assets/deliverables/launch-slide-1.webp" alt="">';
+    face='<img class="folio-slide" src="assets/deliverables/launch-slide-1.webp" alt="">';
   } else if (file) {
     face=`<span class="folio-note"><b>${escape(file.title)}</b>${(source?.rows||[]).slice(0,3).map(row=>`<span><i>${escape(row[0])}</i><u></u></span>`).join('')}</span>`;
   }
@@ -690,7 +691,7 @@ function fileTile(file,actions=false) {
   let face='';
   let kind='document';
   if (file.asset==='launch-brief.pptx') {
-    kind='slides';face='<img alt="" src="/assets/deliverables/launch-slide-1.webp">';
+    kind='slides';face='<img alt="" src="assets/deliverables/launch-slide-1.webp">';
   } else if(file.type==='图片' && file.data?.startsWith('data:image/')) {
     kind='image';face=`<img alt="" src="${escape(file.data)}">`;
   } else if (file.type==='表格' && table) {
@@ -960,7 +961,7 @@ function taskStep(form,step) {
 }
 async function modelStatus() {
   try {
-    const response = await fetch('/api/model',{cache:'no-store'});
+    const response = await fetch(apiUrl('/api/model'),{cache:'no-store'});
     if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) return {available:false};
     const info = await response.json();
     return {available:info.available===true,name:String(info.name||'')};
@@ -989,7 +990,7 @@ async function answer(messages, onProgress = () => {}) {
   }
   let response;
   try {
-    response=await fetch('/api/chat',{
+    response=await fetch(apiUrl('/api/chat'),{
       method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},
       signal:AbortSignal.timeout(175_000),body:JSON.stringify({messages:turns}),
     });
@@ -1256,7 +1257,7 @@ async function preview(file, chosenSheet = 0) {
     if (file.asset==='launch-brief.pptx') {
       const section=file.sections[chosenSheet]||file.sections[0];
       const tabs=file.sections.map(({title},i)=>button(String(i+1),'preview-sheet',{id:file.id,extra:`data-sheet="${i}" aria-label="第 ${i+1} 页 ${escape(title)}" aria-pressed="${i===chosenSheet}"`})).join('');
-      modal(file.name,`<img class="slide-preview" src="/assets/deliverables/launch-slide-${chosenSheet+1}.webp" alt="${escape(section.title+'。'+section.text)}"><div class="slide-controls"><span>第 ${chosenSheet+1} / ${file.sections.length} 页</span><div class="segments sheet-tabs" role="group" aria-label="幻灯片页码">${tabs}</div></div><details class="slide-transcript" ${matchMedia('(max-width:600px)').matches?'open':''}><summary>本页文字</summary><h3>${escape(section.title)}</h3><p>${escape(section.text)}</p></details>`+footer,true);
+      modal(file.name,`<img class="slide-preview" src="assets/deliverables/launch-slide-${chosenSheet+1}.webp" alt="${escape(section.title+'。'+section.text)}"><div class="slide-controls"><span>第 ${chosenSheet+1} / ${file.sections.length} 页</span><div class="segments sheet-tabs" role="group" aria-label="幻灯片页码">${tabs}</div></div><details class="slide-transcript" ${matchMedia('(max-width:600px)').matches?'open':''}><summary>本页文字</summary><h3>${escape(section.title)}</h3><p>${escape(section.text)}</p></details>`+footer,true);
       return;
     }
     const book=file.type==='表格' && file.sections.length>1;
@@ -1281,7 +1282,7 @@ async function download(file) {
     try {storedBlob=await getOfficeFile(file.id);} catch {}
     if(!storedBlob){toast('此浏览器缺少文件内容，请在原对话重新生成。');return;}
   }
-  const url = storedBlob ? URL.createObjectURL(storedBlob) : storedAsset ? '/assets/deliverables/'+storedAsset : file.data || URL.createObjectURL(new Blob([file.content],{type:file.mime}));
+  const url = storedBlob ? URL.createObjectURL(storedBlob) : storedAsset ? 'assets/deliverables/'+storedAsset : file.data || URL.createObjectURL(new Blob([file.content],{type:file.mime}));
   const anchor = Object.assign(document.createElement('a'),{href:url,download:file.name});
   anchor.click();
   if (url.startsWith('blob:')) setTimeout(()=>URL.revokeObjectURL(url),1000);

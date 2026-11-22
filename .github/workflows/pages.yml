@@ -1,0 +1,44 @@
+name: Publish workspace to GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare static site
+        env:
+          API_ORIGIN: ${{ vars.PUBLIC_API_ORIGIN }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from urllib.parse import urlparse
+          from html import escape
+          origin = os.environ['API_ORIGIN']
+          parsed = urlparse(origin)
+          if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ('','/') or parsed.query or parsed.fragment:
+              raise SystemExit('Set PUBLIC_API_ORIGIN to the public HTTPS API origin.')
+          page = Path('dist/index.html')
+          page.write_text(page.read_text().replace('</head>', '<meta name="workspace-api-origin" content="'+escape(origin, quote=True)+'">\n</head>'))
+          PY
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

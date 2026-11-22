@@ -2,7 +2,9 @@
 
 把一个业务问题从提问带到交付。你可以在对话中选择数据源，让助手查数，下载可编辑的 Word、PowerPoint 或 Excel，也可以把相同的指令设为每天自动执行的任务。这是一个使用合成业务数据的交互式产品作品。
 
-[打开公开工作台](https://ai-workspace-demo.wjrhsa.chatgpt.site/) · [体验数据库查询](https://ai-workspace-demo.wjrhsa.chatgpt.site/#database) · [查看自动化任务](https://ai-workspace-demo.wjrhsa.chatgpt.site/#tasks)
+[打开公开工作台](https://jaredwangx.github.io/ai-work-platform/) · [体验数据库查询](https://jaredwangx.github.io/ai-work-platform/#database) · [查看自动化任务](https://jaredwangx.github.io/ai-work-platform/#tasks)
+
+网站前端从本仓库的 main 分支发布到 GitHub Pages。聊天、数据库查询、任务和文件生成由自建服务器处理。Pages 的静态资源使用项目相对路径，访客可直接从仓库右侧的 Website 进入。
 
 ## 用一次门店复盘体验产品
 
@@ -82,3 +84,10 @@ node server/preview.mjs
 node --test server/*.test.mjs
 python3 -m unittest discover -s server -p 'test_*.py'
 ~~~
+
+
+## 在 GitHub Pages 发布
+
+在仓库 Settings → Pages 将 Source 设为 GitHub Actions。在 Settings → Secrets and variables → Actions 的 Variables 中设置 PUBLIC_API_ORIGIN 为自建服务的 HTTPS 源（含非标准端口，如有）。该值是公开地址。模型与数据库凭据只配置在后端。
+
+同源部署直接使用页面所在的服务地址。跨域部署请为 Node 服务设置 SERVICE_ORIGIN 为它自己的公网 HTTPS 源、PAGES_ORIGIN 为 GitHub Pages 源（例如 https://jaredwangx.github.io）。TLS 反向代理将请求转发到只监听回环地址的 Node 服务。修改 main 或手动运行 Publish workspace to GitHub Pages 后，将重新发布前端。
