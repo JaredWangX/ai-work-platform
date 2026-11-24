@@ -96,4 +96,4 @@ python3 -m unittest discover -s server -p 'test_*.py'
 
 在仓库 Settings → Pages 将 Source 设为 GitHub Actions。在 Settings → Secrets and variables → Actions 的 Variables 中设置 PUBLIC_API_ORIGIN 为自建服务的 HTTPS 源（含非标准端口，如有）。该值是公开地址。连接凭据只在提交时经 HTTPS 发往后台，仓库和静态资源中不含用户密钥。
 
-同源部署直接使用页面所在的服务地址。跨域部署请为 Node 服务设置 SERVICE_ORIGIN 为它自己的公网 HTTPS 源、PAGES_ORIGIN 为 GitHub Pages 源（例如 https://jaredwangx.github.io）。TLS 反向代理将请求转发到只监听回环地址的 Node 服务。修改 main 或手动运行 Publish workspace to GitHub Pages 后，将重新发布前端。
+同源部署直接使用页面所在的服务地址。跨域部署请为 Node 服务设置 SERVICE_ORIGIN 为它自己的公网 HTTPS 源、PAGES_ORIGIN 为允许访问的 GitHub Pages 源。多个来源用英文逗号分隔，例如 `https://jaredwangx.github.io,https://jiaruiwang13.github.io`；服务器仅允许精确匹配的来源。TLS 反向代理将请求转发到只监听回环地址的 Node 服务。修改 main 或手动运行 Publish workspace to GitHub Pages 后，将重新发布前端。
